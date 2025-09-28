@@ -19,4 +19,5 @@ def test_happy_path_commute_2025():
 
 def test_off_scope_freelancer():
     result = run_turn(user_id="u2", user_text="I'm a freelancer.")
+    # FIX: Use object access e.code because result.errors contains ErrorItem objects.
     assert any(e.code == "out_of_scope" for e in result.errors)
