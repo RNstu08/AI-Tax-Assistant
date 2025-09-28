@@ -8,6 +8,13 @@ Category = Literal["commuting", "home_office", "equipment", "donations"]
 
 
 class Rule(BaseModel):
+    """
+    Canonical rule record loaded from YAML, strictly validated.
+    - rule_id must be stable and unique per year.
+    - required_data_points lists keys needed by calculators.
+    - snippet is a 1-3 sentence summary for retrieval.
+    """
+
     rule_id: str = Field(..., pattern=r"^de_(2024|2025)_[a-z0-9_]+$")
     year: int = Field(..., ge=2024, le=2025)
     country: Literal["DE"]
@@ -30,6 +37,8 @@ class Rule(BaseModel):
 
 
 class RuleHit(BaseModel):
+    """Retrieval hit, safe to surface to the Reasoner and UI."""
+
     rule_id: str
     year: int
     title: str
