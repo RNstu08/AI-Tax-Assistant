@@ -1,0 +1,11 @@
+rule_id: de_2025_commuting_allowance
+year: 2025
+country: DE
+title: Commuting Allowance (Pendlerpauschale) - 2025
+category: commuting
+summary: "For 2025, the commuting allowance remains at €0.30/km for the first 20 km and €0.38/km from the 21st km onwards (one-way)."
+snippet: "The 2025 commuting allowance is €0.30 per kilometer for the first 20 km and €0.38 for each subsequent kilometer of your one-way journey to your primary workplace."
+required_data_points:
+  - deductions.commute_km_per_day
+  - deductions.work_days_per_year
+calculator_binding: calc_commute

@@ -1,0 +1,10 @@
+rule_id: de_2024_home_office_pauschale
+year: 2024
+country: DE
+title: Home Office Lump Sum (Homeofficepauschale) - 2024
+category: home_office
+summary: "A flat rate of €6 per day worked predominantly from home, capped at €1,260 per year (210 days). No need for a separate study room."
+snippet: "For each day you worked primarily from home in 2024, you can claim a lump sum of €6, up to a maximum of €1,260 for the year."
+required_data_points:
+  - deductions.home_office_days
+calculator_binding: calc_home_office

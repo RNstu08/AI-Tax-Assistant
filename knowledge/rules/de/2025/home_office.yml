@@ -1,0 +1,10 @@
+rule_id: de_2025_home_office_pauschale
+year: 2025
+country: DE
+title: Home Office Lump Sum (Homeofficepauschale) - 2025
+category: home_office
+summary: "The home office lump sum for 2025 is €6 per day, with the annual maximum remaining at €1,260 (for 210 days)."
+snippet: "In 2025, you can claim a €6 lump sum for each day worked mainly from home. The total claim is capped at €1,260 per year."
+required_data_points:
+  - deductions.home_office_days
+calculator_binding: calc_home_office

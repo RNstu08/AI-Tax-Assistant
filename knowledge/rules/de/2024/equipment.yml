@@ -1,0 +1,10 @@
+rule_id: de_2024_work_equipment
+year: 2024
+country: DE
+title: Work-related Equipment (Arbeitsmittel) - 2024
+category: equipment
+summary: "Costs for items used almost exclusively for work (e.g., laptop, desk) are deductible. Items up to €952 gross can often be fully deducted in the year of purchase."
+snippet: "For 2024, you can deduct the cost of work equipment. Items costing up to €952 (gross) can typically be deducted immediately in full."
+required_data_points:
+  - deductions.equipment_items
+calculator_binding: calc_equipment_item

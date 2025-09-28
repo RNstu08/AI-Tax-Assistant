@@ -1,0 +1,10 @@
+rule_id: de_2025_work_equipment
+year: 2025
+country: DE
+title: Work-related Equipment (Arbeitsmittel) - 2025
+category: equipment
+summary: "For 2025, work-related items costing up to €952 gross can generally be fully deducted in the year of purchase. More expensive items are depreciated over time."
+snippet: "You can deduct the cost of work equipment in 2025. Items up to €952 (gross) are considered low-value assets and can be fully written off immediately."
+required_data_points:
+  - deductions.equipment_items
+calculator_binding: calc_equipment_item

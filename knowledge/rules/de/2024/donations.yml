@@ -1,0 +1,10 @@
+rule_id: de_2024_charitable_donations
+year: 2024
+country: DE
+title: Charitable Donations (Sonderausgaben) - 2024
+category: donations
+summary: "Donations to recognized charitable organizations in Germany or the EU are deductible as special expenses (Sonderausgaben). A receipt is generally required."
+snippet: "In 2024, you can deduct donations made to recognized charities. Make sure you have a receipt (Zuwendungsbestätigung) as proof."
+required_data_points:
+  - deductions.donations
+calculator_binding: calc_donations

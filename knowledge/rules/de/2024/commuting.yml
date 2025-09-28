@@ -1,0 +1,11 @@
+rule_id: de_2024_commuting_allowance
+year: 2024
+country: DE
+title: Commuting Allowance (Pendlerpauschale) - 2024
+category: commuting
+summary: "A flat-rate allowance for the journey between home and the primary workplace. It's €0.30/km for the first 20 km and €0.38/km from the 21st km onwards (one-way)."
+snippet: "For 2024, you can claim a commuting allowance of €0.30 per kilometer for the first 20 km of your one-way trip to work, and €0.38 for each additional kilometer."
+required_data_points:
+  - deductions.commute_km_per_day
+  - deductions.work_days_per_year
+calculator_binding: calc_commute
