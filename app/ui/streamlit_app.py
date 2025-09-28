@@ -11,7 +11,7 @@ from app.ui.components.trace_panel import render_trace_panel
 
 
 @st.cache_resource
-def startup():
+def startup() -> None:  # FIX: Add '-> None' return type annotation
     """Builds the rules index on the first run."""
     build_index()
 
