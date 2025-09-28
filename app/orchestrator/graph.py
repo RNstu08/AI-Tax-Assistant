@@ -48,29 +48,24 @@ def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
 
 
 def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
-    """Extracts structured data from user input using regex and keywords."""
     state.trace.nodes_run.append("extractor")
     text = state.user_input.lower()
     deductions = state.profile.data.setdefault("deductions", {})
-
-    nums = [int(n) for n in re.findall(r"\b\d+\b", text)]
     amounts = parse_eur_amounts(state.user_input)
 
-    # FIX: Use multi-line if statements
-    if "commute" in text or "pendler" in text:
-        state.category_hint = "commuting"
-        if nums:
-            deductions["commute_km_per_day"] = nums[0]
-        if len(nums) > 1:
-            deductions["work_days_per_year"] = nums[1]
+    km_match = re.search(r"(\d+)\s*km", text)
+    if km_match:
+        deductions["commute_km_per_day"] = int(km_match.group(1))
 
-    if "home office" in text or "homeoffice" in text:
-        state.category_hint = "home_office"
-        if nums:
-            deductions["home_office_days"] = nums[0]
+    days_match = re.search(r"(\d+)\s*(?:work\s*days|days|tage)", text)
+    if days_match:
+        deductions["work_days_per_year"] = int(days_match.group(1))
+
+    ho_match = re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text)
+    if ho_match:
+        deductions["home_office_days"] = int(ho_match.group(1))
 
     if "laptop" in text or "equipment" in text or amounts:
-        state.category_hint = "equipment"
         if amounts:
             items = deductions.setdefault("equipment_items", [])
             fy = state.profile.data.get("filing", {}).get("filing_year", date.today().year)
@@ -81,12 +76,10 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
                     "has_receipt": True,
                 }
             )
-
     return state
 
 
 def node_knowledge_agent(state: TurnState, retriever: InMemoryRetriever) -> TurnState:
-    # ... (This function is unchanged)
     state.trace.nodes_run.append("knowledge_agent")
     filing_year = state.profile.data.get("filing", {}).get("filing_year", 2025)
     state.rule_hits = retriever.search(query=state.retrieval_query, year=filing_year)
@@ -95,7 +88,6 @@ def node_knowledge_agent(state: TurnState, retriever: InMemoryRetriever) -> Turn
 
 
 def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
-    # ... (This function is unchanged)
     state.trace.nodes_run.append("calculators")
     deductions = state.profile.data.get("deductions", {})
     filing_year = state.profile.data.get("filing", {}).get("filing_year", 2025)
@@ -130,12 +122,10 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
                 total_equip += res["amount_eur"]
         if total_equip > 0:
             state.calc_results["equipment_total"] = {"amount_eur": total_equip}
-
     return state
 
 
 def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
-    # ... (This function is unchanged, but the line-length fix is included)
     state.trace.nodes_run.append("reasoner")
     lines = [f"This is a response about '{state.intent}'."]
     if state.rule_hits:
@@ -146,7 +136,7 @@ def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
     if state.calc_results:
         lines.append("\n**Estimated Amounts:**")
         for key, res in state.calc_results.items():
-            if "total" not in key and res.get("amount_eur"):
+            if "total" not in key and "amount_eur" in res:
                 lines.append(f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}")
         if "equipment_total" in state.calc_results:
             total_str = fmt_eur(state.calc_results["equipment_total"]["amount_eur"])
@@ -157,23 +147,34 @@ def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
 
 
 def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
-    # ... (This function is unchanged)
+    """Checks for grounding, safety, and style, adding flags as needed."""
     state.trace.nodes_run.append("critic")
+
+    # Use a local list for flags to ensure a clean slate each run
+    flags: list[str] = []
+
+    # Check that citations are a subset of retrieved rule hits
     hit_ids = {h.rule_id for h in state.rule_hits}
     cited_ids = set(re.findall(r"\[(de_\d{4}_\w+)\]", state.answer_draft))
     if not cited_ids.issubset(hit_ids):
-        state.critic_flags.append("citation_mismatch")
+        flags.append("citation_mismatch")
 
-    if "€" in state.answer_draft and not state.calc_results:
-        state.critic_flags.append("ungrounded_euro_amount_removed")
+    # FIX: Add the logic to flag when calculator-backed amounts are present
+    euros_present = "€" in state.answer_draft
+    calculators_used = bool(state.calc_results)
+    if euros_present and calculators_used:
+        flags.append("amounts_backed_by_calculators")
+    elif euros_present and not calculators_used:
+        flags.append("ungrounded_euro_amount_removed")
         state.answer_draft = re.sub(r"€\s?\d[\d.,]*", "[amount]", state.answer_draft)
 
+    # Final assignment
+    state.critic_flags = flags
     state.answer_revised = f"{state.answer_draft}\n\n{state.disclaimer}"
     return state
 
 
 def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
-    # ... (This function is unchanged)
     state.trace.nodes_run.append("action_planner")
     payload = {"example": True}
     state.proposed_actions.append(
@@ -191,7 +192,6 @@ def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 
 def node_trace_emitter(state: TurnState) -> TurnState:
-    # ... (This function is unchanged)
     state.trace.nodes_run.append("trace_emitter")
     state.trace.disclaimers.append(state.disclaimer)
     return state
@@ -201,7 +201,6 @@ def node_trace_emitter(state: TurnState) -> TurnState:
 
 
 def run_turn(user_id: str, user_text: str, filing_year_override: int | None = None) -> TurnState:
-    # ... (This function is unchanged)
     policy = load_policy()
     groq = GroqAdapter(api_key=None)
     store = ProfileStore(db_path=".data/profile.db")
