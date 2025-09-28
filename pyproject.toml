@@ -34,10 +34,11 @@ exclude = ["tests/", ".venv", ".data"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# FIX: This tells pytest to look for packages in the root directory.
+pythonpath = ["."]
 
-# --- ADD THIS NEW SECTION ---
+# FIX: This tells the installer to find both the 'app' and 'tools' packages.
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["app*", "tools*"]
 exclude = ["tests*"]
-# ---------------------------

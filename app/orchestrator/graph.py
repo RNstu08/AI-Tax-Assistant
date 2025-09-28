@@ -1,29 +1,45 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import date
 from hashlib import sha256
+from typing import Any
 
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore
+from app.orchestrator.safety import patch_allowed_by_policy
 from app.safety.policy import SafetyPolicy, load_policy
-from tools.calculators import (
-    calc_commute,
-    calc_equipment_item,
-    calc_home_office,
-)
+from tools.calculators import calc_commute, calc_equipment_item, calc_home_office
 from tools.money import D, fmt_eur, parse_eur_amounts
 
-from .models import ActionProposal, ErrorItem, TurnState
+from .models import (
+    ActionProposal,
+    CommitResult,
+    ErrorItem,
+    FieldDiff,
+    PatchProposal,
+    TurnState,
+    UIAction,
+)
 
 
 def _hash_payload(obj: dict) -> str:
     """Creates a deterministic hash for a payload dictionary."""
-    import json
-
     return sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
+
+
+def _deep_merge(source: dict, destination: dict) -> dict:
+    """Helper to deeply merge dictionaries for temporary state calculation."""
+    for key, value in source.items():
+        if isinstance(value, dict):
+            node = destination.setdefault(key, {})
+            _deep_merge(value, node)
+        else:
+            destination[key] = value
+    return destination
 
 
 # --- Agent Nodes ---
@@ -48,26 +64,27 @@ def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
 
 
 def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
+    """Extracts data from user input and creates a PatchProposal if data is found."""
     state.trace.nodes_run.append("extractor")
     text = state.user_input.lower()
-    deductions = state.profile.data.setdefault("deductions", {})
+    patch: dict[str, Any] = {}
     amounts = parse_eur_amounts(state.user_input)
 
     km_match = re.search(r"(\d+)\s*km", text)
     if km_match:
-        deductions["commute_km_per_day"] = int(km_match.group(1))
+        patch.setdefault("deductions", {})["commute_km_per_day"] = int(km_match.group(1))
 
     days_match = re.search(r"(\d+)\s*(?:work\s*days|days|tage)", text)
     if days_match:
-        deductions["work_days_per_year"] = int(days_match.group(1))
+        patch.setdefault("deductions", {})["work_days_per_year"] = int(days_match.group(1))
 
     ho_match = re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text)
     if ho_match:
-        deductions["home_office_days"] = int(ho_match.group(1))
+        patch.setdefault("deductions", {})["home_office_days"] = int(ho_match.group(1))
 
     if "laptop" in text or "equipment" in text or amounts:
         if amounts:
-            items = deductions.setdefault("equipment_items", [])
+            items = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
             fy = state.profile.data.get("filing", {}).get("filing_year", date.today().year)
             items.append(
                 {
@@ -76,6 +93,9 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
                     "has_receipt": True,
                 }
             )
+
+    if patch:
+        state.patch_proposal = PatchProposal(patch=patch, rationale="Extracted from user input.")
     return state
 
 
@@ -89,8 +109,12 @@ def node_knowledge_agent(state: TurnState, retriever: InMemoryRetriever) -> Turn
 
 def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("calculators")
-    deductions = state.profile.data.get("deductions", {})
-    filing_year = state.profile.data.get("filing", {}).get("filing_year", 2025)
+    temp_profile_data = json.loads(json.dumps(state.profile.data))
+    if state.patch_proposal:
+        _deep_merge(state.patch_proposal.patch, temp_profile_data)
+
+    deductions = temp_profile_data.get("deductions", {})
+    filing_year = temp_profile_data.get("filing", {}).get("filing_year", 2025)
     state.calc_results = {}
 
     if "commute_km_per_day" in deductions and "work_days_per_year" in deductions:
@@ -147,19 +171,13 @@ def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
 
 
 def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
-    """Checks for grounding, safety, and style, adding flags as needed."""
     state.trace.nodes_run.append("critic")
-
-    # Use a local list for flags to ensure a clean slate each run
     flags: list[str] = []
-
-    # Check that citations are a subset of retrieved rule hits
     hit_ids = {h.rule_id for h in state.rule_hits}
     cited_ids = set(re.findall(r"\[(de_\d{4}_\w+)\]", state.answer_draft))
     if not cited_ids.issubset(hit_ids):
         flags.append("citation_mismatch")
 
-    # FIX: Add the logic to flag when calculator-backed amounts are present
     euros_present = "€" in state.answer_draft
     calculators_used = bool(state.calc_results)
     if euros_present and calculators_used:
@@ -168,7 +186,6 @@ def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
         flags.append("ungrounded_euro_amount_removed")
         state.answer_draft = re.sub(r"€\s?\d[\d.,]*", "[amount]", state.answer_draft)
 
-    # Final assignment
     state.critic_flags = flags
     state.answer_revised = f"{state.answer_draft}\n\n{state.disclaimer}"
     return state
@@ -176,18 +193,31 @@ def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("action_planner")
-    payload = {"example": True}
-    state.proposed_actions.append(
-        ActionProposal(
-            action_id=f"compute_estimate:{uuid.uuid4().hex[:8]}",
-            kind="compute_estimate",
-            payload=payload,
-            payload_hash=_hash_payload(payload),
-            rationale="Run calculators with the provided data.",
-            expected_effect="Shows an itemized estimate.",
-            requires_confirmation=False,
+    if state.calc_results:
+        payload = {"rules": [h.rule_id for h in state.rule_hits]}
+        state.proposed_actions.append(
+            ActionProposal(
+                action_id=f"compute_estimate:{_hash_payload(payload)}",
+                kind="compute_estimate",
+                payload=payload,
+                payload_hash=_hash_payload(payload),
+                rationale="Run calculators with the provided data.",
+                expected_effect="Shows an itemized estimate.",
+                requires_confirmation=False,
+            )
         )
-    )
+    if state.patch_proposal:
+        payload = state.patch_proposal.patch
+        state.proposed_actions.append(
+            ActionProposal(
+                action_id=f"confirm_profile_patch:{_hash_payload(payload)}",
+                kind="confirm_profile_patch",
+                payload=payload,
+                payload_hash=_hash_payload(payload),
+                rationale="Save the details we discussed to your profile.",
+                expected_effect="Updates your profile for future calculations.",
+            )
+        )
     return state
 
 
@@ -197,19 +227,51 @@ def node_trace_emitter(state: TurnState) -> TurnState:
     return state
 
 
-# --- Orchestrator Entrypoint ---
+def apply_ui_action(
+    user_id: str, ui_action: UIAction, last_state: TurnState, store: ProfileStore
+) -> TurnState:
+    policy = load_policy()
+    state = last_state.model_copy(deep=True)
+    proposals = {p.action_id: p for p in state.proposed_actions}
+    if ui_action.kind == "confirm" and ui_action.ref_action in proposals:
+        prop = proposals[ui_action.ref_action]
+        allowed, why = patch_allowed_by_policy(prop.payload, policy)
+        if not allowed:
+            state.errors.append(ErrorItem(code="policy_violation", message=why))
+            return state
+        new_snapshot, diff = store.apply_patch(user_id, prop.payload)
+        store.commit_action(
+            user_id, prop.action_id, prop.kind, prop.payload, prop.payload_hash, diff, True
+        )
+        state.profile = new_snapshot
+        state.profile_diff = [FieldDiff(**d) for d in diff]
+        state.committed_action = CommitResult(
+            action_id=prop.action_id, committed=True, version_after=new_snapshot.version
+        )
+    elif ui_action.kind == "undo":
+        try:
+            new_snapshot = store.undo_action(user_id, f"undo:{uuid.uuid4().hex[:8]}")
+            state.profile = new_snapshot
+        except ValueError as e:
+            state.errors.append(ErrorItem(code="undo_failed", message=str(e)))
+    return state
 
 
-def run_turn(user_id: str, user_text: str, filing_year_override: int | None = None) -> TurnState:
+def run_turn(
+    user_id: str,
+    user_text: str,
+    store: ProfileStore | None = None,
+    filing_year_override: int | None = None,
+) -> TurnState:
+    if store is None:
+        store = ProfileStore()
+
     policy = load_policy()
     groq = GroqAdapter(api_key=None)
-    store = ProfileStore(db_path=".data/profile.db")
     retriever = InMemoryRetriever()
-
     profile = store.get_profile(user_id)
     if filing_year_override:
         profile.data["filing"] = {"filing_year": filing_year_override}
-
     state = TurnState(
         correlation_id=f"turn:{uuid.uuid4().hex[:12]}",
         user_id=user_id,
@@ -217,14 +279,21 @@ def run_turn(user_id: str, user_text: str, filing_year_override: int | None = No
         profile=profile,
     )
 
-    state = node_safety_gate(state, policy)
-    state = node_router(state, groq)
-    state = node_extractor(state, policy)
-    state = node_knowledge_agent(state, retriever)
-    state = node_calculators(state, policy)
-    state = node_reasoner(state, groq)
-    state = node_critic(state, policy)
-    state = node_action_planner(state, policy)
-    state = node_trace_emitter(state)
+    # A bit of reflection to pass the right dependencies to each node
+    nodes = [
+        (node_safety_gate, {"policy": policy}),
+        (node_router, {"groq": groq}),
+        (node_extractor, {"policy": policy}),
+        (node_knowledge_agent, {"retriever": retriever}),
+        (node_calculators, {"policy": policy}),
+        (node_reasoner, {"groq": groq}),
+        (node_critic, {"policy": policy}),
+        (node_action_planner, {"policy": policy}),
+        (node_trace_emitter, {}),
+    ]
 
+    for node_func, deps in nodes:
+        if state.errors:
+            break
+        state = node_func(state, **deps)
     return state
