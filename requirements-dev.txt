@@ -1,0 +1,12 @@
+# Runtime
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
+structlog>=24.1
+
+# Dev/test
+pytest>=8.2
+black>=24.8
+ruff>=0.6
+mypy>=1.10
+typing-extensions>=4.12
+pre-commit>=3.7
