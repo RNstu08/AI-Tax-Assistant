@@ -58,3 +58,16 @@ python -m app.knowledge.ingest
 # Run tests
 Write-Host "Running tests..."
 pytest -q
+
+
+### PR3 — Orchestrator and Stubbed End-to-End Flow
+
+-   **Orchestrator:** A deterministic graph of agent nodes is defined in `app/orchestrator/graph.py`.
+-   **Contracts:** `TurnState` and other Pydantic models define the data flow.
+-   **Stubs:** The flow is fully runnable offline using a mock `GroqAdapter`.
+
+To run a single turn programmatically:
+```python
+from app.orchestrator.graph import run_turn
+result = run_turn(user_id="demo", user_text="I commute 30 km in 2025.")
+print(result.answer_revised)
