@@ -1,0 +1,7 @@
+id: s02_equipment_de
+turns:
+  - user: "Habe 2024 einen Laptop gekauft."
+    filing_year: 2024
+    expect:
+      rule_ids_any: ["de_2024_work_equipment"]
+      category_hint: "equipment"

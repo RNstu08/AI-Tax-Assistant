@@ -1,0 +1,6 @@
+id: s03_off_scope
+turns:
+  - user: "I am a freelancer in Austria, can you help?"
+    filing_year: 2024
+    expect:
+      is_out_of_scope: true

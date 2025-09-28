@@ -1,0 +1,7 @@
+id: s01_commute_ho_2025_en
+turns:
+  - user: "I commute 30 km and worked from home 100 days in 2025."
+    filing_year: 2025
+    expect:
+      rule_ids_any: ["de_2025_commuting_allowance", "de_2025_home_office_pauschale"]
+      actions_include: ["compute_estimate"]
