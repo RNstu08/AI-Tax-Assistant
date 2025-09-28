@@ -1,0 +1,10 @@
+scope:
+  country: DE
+  years: [2024, 2025]
+  persona: employee
+claims:
+  require_citation: true
+questions:
+  max_per_turn: 2
+pii:
+  disallow: ["steuer_id", "iban", "street_address", "dob", "phone", "email"]
