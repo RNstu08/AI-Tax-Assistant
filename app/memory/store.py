@@ -117,15 +117,14 @@ class ProfileStore:
         self, user_id: str, patch: dict[str, Any]
     ) -> tuple[ProfileSnapshot, list[dict]]:
         with _connect(self.sqlite_path) as con:
-            # Use a cursor to ensure we get the most recent data within the transaction
-            cur = con.cursor()
-            cur.execute("SELECT version, data FROM profiles WHERE user_id = ?", (user_id,))
-            current_row = cur.fetchone()
-
+            current_row = con.execute(
+                "SELECT version, data FROM profiles WHERE user_id = ?", (user_id,)
+            ).fetchone()
             if not current_row:
-                self.get_profile(user_id)
-                cur.execute("SELECT version, data FROM profiles WHERE user_id = ?", (user_id,))
-                current_row = cur.fetchone()
+                self.get_profile(user_id)  # Ensure profile exists
+                current_row = con.execute(
+                    "SELECT version, data FROM profiles WHERE user_id = ?", (user_id,)
+                ).fetchone()
 
             current_version, current_data_json = current_row
             old_data = json.loads(current_data_json)
@@ -134,7 +133,7 @@ class ProfileStore:
             new_version = current_version + 1
             diff = _compute_diff(old_data, new_data)
 
-            cur.execute(
+            con.execute(
                 "UPDATE profiles SET version = ?, data = ?, updated_at = ? WHERE user_id = ?",
                 (new_version, json.dumps(new_data), _utc_ms(), user_id),
             )
