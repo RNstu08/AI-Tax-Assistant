@@ -4,13 +4,12 @@ import re
 import uuid
 from hashlib import sha256
 
-from app.i18n.microcopy import t
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore
 from app.safety.policy import SafetyPolicy, load_policy
 
-from .models import ActionProposal, TurnState
+from .models import ActionProposal, ErrorItem, TurnState
 
 
 def _hash_payload(obj: dict) -> str:
@@ -26,8 +25,9 @@ def _hash_payload(obj: dict) -> str:
 def node_safety_gate(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("safety_gate")
     if any(w in state.user_input.lower() for w in ["freelancer", "austria"]):
-        state.errors.append({"code": "out_of_scope", "message": "Query is out of scope."})
-    state.disclaimer = t("en", "disclaimer")
+        # FIX: Append an instance of ErrorItem, not a dict
+        state.errors.append(ErrorItem(code="out_of_scope", message="Query is out of scope."))
+    state.disclaimer = "Informational only; not tax advice. Please verify with official guidance."
     return state
 
 
@@ -51,7 +51,6 @@ def node_knowledge_agent(state: TurnState, retriever: InMemoryRetriever) -> Turn
 
 def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
     state.trace.nodes_run.append("reasoner")
-    # In PR3, we just create a simple stubbed response, not calling the LLM
     lines = [f"This is a stubbed response about '{state.intent}'."]
     if state.rule_hits:
         lines.append("Relevant rules found:")
@@ -63,7 +62,6 @@ def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
 
 def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("critic")
-    # A simple critic check: ensure citations are from retrieved hits.
     hit_ids = {h.rule_id for h in state.rule_hits}
     cited_ids = set(re.findall(r"\[(de_\d{4}_\w+)\]", state.answer_draft))
     if not cited_ids.issubset(hit_ids):
@@ -74,7 +72,6 @@ def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("action_planner")
-    # Propose a generic action
     payload = {"example": True}
     state.proposed_actions.append(
         ActionProposal(
@@ -101,7 +98,6 @@ def node_trace_emitter(state: TurnState) -> TurnState:
 
 def run_turn(user_id: str, user_text: str, filing_year_override: int | None = None) -> TurnState:
     """Deterministic per-turn orchestrator run (read-only and stubbed in PR3)."""
-    # Initialize services
     policy = load_policy()
     groq = GroqAdapter(api_key=None)  # Force offline mode
     store = ProfileStore(db_path=".data/profile.db")
@@ -111,7 +107,6 @@ def run_turn(user_id: str, user_text: str, filing_year_override: int | None = No
     if filing_year_override:
         profile.data["filing"] = {"filing_year": filing_year_override}
 
-    # Initialize state
     state = TurnState(
         correlation_id=f"turn:{uuid.uuid4().hex[:12]}",
         user_id=user_id,
@@ -119,7 +114,6 @@ def run_turn(user_id: str, user_text: str, filing_year_override: int | None = No
         profile=profile,
     )
 
-    # Execute the graph
     if not state.errors:
         state = node_safety_gate(state, policy)
     if not state.errors:

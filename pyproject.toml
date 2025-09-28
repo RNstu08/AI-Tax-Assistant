@@ -13,9 +13,11 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E", "F", "I", "B", "UP"]
-ignore = ["E203"] # allow black's slicing
 exclude = [".venv", ".data", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E203"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -32,3 +34,10 @@ exclude = ["tests/", ".venv", ".data"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+# --- ADD THIS NEW SECTION ---
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["tests*"]
+# ---------------------------

@@ -1,0 +1,10 @@
+rule_id: de_2025_charitable_donations
+year: 2025
+country: DE
+title: Charitable Donations (Sonderausgaben) - 2025
+category: donations
+summary: "Donations to recognized charitable organizations remain deductible in 2025. You will need proof of donation, typically a receipt from the organization."
+snippet: "For your 2025 tax return, you can deduct donations to recognized charities. Always keep the official donation receipt (Zuwendungsbestätigung)."
+required_data_points:
+  - deductions.donations
+calculator_binding: calc_donations

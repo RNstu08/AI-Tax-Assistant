@@ -1,7 +1,8 @@
 from app.infra.config import AppSettings
-from app.services.telemetry import configure_logging
 from app.memory.store import ProfileStore
+from app.services.telemetry import configure_logging
 from tools.constants import CONST
+
 
 def test_imports_and_basic_objects():
     # Config should load with defaults
