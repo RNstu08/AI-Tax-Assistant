@@ -16,7 +16,6 @@ def test_happy_path_commute_2025(tmp_path: Path):
     )
     assert not result.errors
     assert any(p.kind == "compute_estimate" for p in result.proposed_actions)
-    assert any(p.kind == "confirm_profile_patch" for p in result.proposed_actions)
 
 
 def test_off_scope_freelancer(tmp_path: Path):

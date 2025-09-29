@@ -9,13 +9,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-# --- Data Models ---
 class ProfileSnapshot(BaseModel):
     version: int = 0
     data: dict[str, Any] = Field(default_factory=dict)
 
 
-# --- Private Helper Functions ---
 def _utc_ms() -> int:
     return int(time.time() * 1000)
 
@@ -75,7 +73,6 @@ def _apply_diff_reverse(data: dict[str, Any], diffs: list[dict]) -> dict[str, An
     return out
 
 
-# --- ProfileStore Class ---
 class ProfileStore:
     def __init__(self, sqlite_path: str = ".data/profile.db"):
         self.sqlite_path = sqlite_path
@@ -121,7 +118,7 @@ class ProfileStore:
                 "SELECT version, data FROM profiles WHERE user_id = ?", (user_id,)
             ).fetchone()
             if not current_row:
-                self.get_profile(user_id)  # Ensure profile exists
+                self.get_profile(user_id)
                 current_row = con.execute(
                     "SELECT version, data FROM profiles WHERE user_id = ?", (user_id,)
                 ).fetchone()

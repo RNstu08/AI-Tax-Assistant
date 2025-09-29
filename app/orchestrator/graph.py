@@ -9,7 +9,7 @@ from typing import Any
 
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
-from app.memory.store import ProfileStore
+from app.memory.store import ProfileStore, _deep_merge
 from app.orchestrator.safety import patch_allowed_by_policy
 from app.safety.policy import SafetyPolicy, load_policy
 from tools.calculators import calc_commute, calc_equipment_item, calc_home_office
@@ -31,15 +31,15 @@ def _hash_payload(obj: dict) -> str:
     return sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
 
 
-def _deep_merge(source: dict, destination: dict) -> dict:
-    """Helper to deeply merge dictionaries for temporary state calculation."""
-    for key, value in source.items():
-        if isinstance(value, dict):
-            node = destination.setdefault(key, {})
-            _deep_merge(value, node)
-        else:
-            destination[key] = value
-    return destination
+# def _deep_merge(source: dict, destination: dict) -> dict:
+#     """Helper to deeply merge dictionaries for temporary state calculation."""
+#     for key, value in source.items():
+#         if isinstance(value, dict):
+#             node = destination.setdefault(key, {})
+#             _deep_merge(value, node)
+#         else:
+#             destination[key] = value
+#     return destination
 
 
 # --- Agent Nodes ---
@@ -193,7 +193,7 @@ def node_critic(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("action_planner")
-    if state.calc_results:
+    if state.rule_hits:
         payload = {"rules": [h.rule_id for h in state.rule_hits]}
         state.proposed_actions.append(
             ActionProposal(
@@ -201,7 +201,7 @@ def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
                 kind="compute_estimate",
                 payload=payload,
                 payload_hash=_hash_payload(payload),
-                rationale="Run calculators with the provided data.",
+                rationale="Run calculators with the available data.",
                 expected_effect="Shows an itemized estimate.",
                 requires_confirmation=False,
             )

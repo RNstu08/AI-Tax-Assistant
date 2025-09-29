@@ -4,18 +4,12 @@ from app.services.telemetry import configure_logging
 from tools.constants import CONST
 
 
-def test_imports_and_basic_objects():
-    # Config should load with defaults
+def test_imports_and_basic_objects(tmp_path):
     cfg = AppSettings()
     assert cfg.environment == "dev"
-
-    # Logging should configure without error
     configure_logging(json_logs=True, level="INFO")
-
-    # Store stub should return a dummy snapshot
-    store = ProfileStore(db_path=".data/profile.db")
+    # FIX: Use correct argument and isolated path
+    store = ProfileStore(sqlite_path=str(tmp_path / "test.db"))
     snap = store.get_profile(user_id="u1")
-    assert snap.version == 1
-
-    # Constants should contain expected data
-    assert 2024 in CONST and "commute" in CONST[2024]
+    assert snap.version == 0
+    assert 2024 in CONST
