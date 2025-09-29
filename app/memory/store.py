@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.safety.files import sanitize_filename, sha256_hex, validate_file
+
 
 class ProfileSnapshot(BaseModel):
     version: int = 0
@@ -74,9 +76,11 @@ def _apply_diff_reverse(data: dict[str, Any], diffs: list[dict]) -> dict[str, An
 
 
 class ProfileStore:
-    def __init__(self, sqlite_path: str = ".data/profile.db"):
+    def __init__(self, sqlite_path: str = ".data/profile.db", upload_dir: str = ".data/uploads"):
         self.sqlite_path = sqlite_path
+        self.upload_dir = upload_dir
         Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(upload_dir).mkdir(parents=True, exist_ok=True)
         with _connect(self.sqlite_path) as con:
             self._ensure_schema(con)
 
@@ -92,6 +96,18 @@ class ProfileStore:
                 payload TEXT NOT NULL, payload_hash TEXT NOT NULL,
                 committed INTEGER NOT NULL, version_after INTEGER, diff TEXT,
                 created_at INTEGER NOT NULL, undo_of TEXT
+            );
+            CREATE TABLE IF NOT EXISTS evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+                turn_id TEXT, action_id TEXT, kind TEXT NOT NULL,
+                payload TEXT, result TEXT, created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS evidence_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+                filename TEXT NOT NULL, content_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
+                category TEXT, turn_id TEXT, created_at INTEGER NOT NULL,
+                path TEXT NOT NULL
             );
             """
         )
@@ -204,3 +220,91 @@ class ProfileStore:
             undo_of=last_action["id"],
         )
         return new_snapshot
+
+    def add_attachment(
+        self,
+        user_id: str,
+        filename: str,
+        content_type: str | None,
+        data: bytes,
+        category: str | None,
+        turn_id: str,
+    ) -> dict:
+        is_valid, reason = validate_file(content_type, len(data))
+        if not is_valid:
+            raise ValueError(reason)
+
+        fname = sanitize_filename(filename)
+        hash_val = sha256_hex(data)
+        dest_path = Path(self.upload_dir) / f"{hash_val[:16]}_{fname}"
+
+        with open(dest_path, "wb") as f:
+            f.write(data)
+
+        meta = {
+            "user_id": user_id,
+            "filename": fname,
+            "content_type": content_type,
+            "size_bytes": len(data),
+            "sha256": hash_val,
+            "category": category,
+            "turn_id": turn_id,
+            "created_at": _utc_ms(),
+            "path": str(dest_path),
+        }
+        with _connect(self.sqlite_path) as con:
+            # FIX: Reformat long SQL string
+            cur = con.execute(
+                (
+                    "INSERT INTO evidence_files (user_id, filename, content_type, size_bytes, "
+                    "sha256, category, turn_id, created_at, path) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)"
+                ),
+                (
+                    meta["user_id"],
+                    meta["filename"],
+                    meta["content_type"],
+                    meta["size_bytes"],
+                    meta["sha256"],
+                    meta["category"],
+                    meta["turn_id"],
+                    meta["created_at"],
+                    meta["path"],
+                ),
+            )
+            meta["id"] = cur.lastrowid
+        return meta
+
+    def list_attachments(self, user_id: str, limit: int = 100) -> list[dict]:
+        with _connect(self.sqlite_path) as con:
+            # FIX: Reformat long SQL string
+            cur = con.execute(
+                (
+                    "SELECT id, filename, content_type, size_bytes, sha256, category, created_at "
+                    "FROM evidence_files WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
+                ),
+                (user_id, limit),
+            )
+            rows = cur.fetchall()
+            cols = [description[0] for description in cur.description]
+            return [dict(zip(cols, row, strict=False)) for row in rows]
+
+    def list_actions(self, user_id: str, limit: int = 100) -> list[dict]:
+        with _connect(self.sqlite_path) as con:
+            cur = con.execute(
+                "SELECT * FROM actions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            )
+            rows = cur.fetchall()
+            cols = [description[0] for description in cur.description]
+            return [dict(zip(cols, row, strict=False)) for row in rows]
+
+    def list_evidence(self, user_id: str, limit: int = 100) -> list[dict]:
+        with _connect(self.sqlite_path) as con:
+            cur = con.execute(
+                "SELECT * FROM evidence WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            )
+            rows = cur.fetchall()
+            cols = [description[0] for description in cur.description]
+            return [dict(zip(cols, row, strict=False)) for row in rows]
