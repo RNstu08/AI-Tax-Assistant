@@ -9,7 +9,7 @@ from typing import Any
 
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
-from app.memory.store import ProfileStore, _deep_merge
+from app.memory.store import ProfileStore
 from app.orchestrator.safety import patch_allowed_by_policy
 from app.safety.policy import SafetyPolicy, load_policy
 from tools.calculators import calc_commute, calc_equipment_item, calc_home_office
@@ -31,15 +31,15 @@ def _hash_payload(obj: dict) -> str:
     return sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
 
 
-# def _deep_merge(source: dict, destination: dict) -> dict:
-#     """Helper to deeply merge dictionaries for temporary state calculation."""
-#     for key, value in source.items():
-#         if isinstance(value, dict):
-#             node = destination.setdefault(key, {})
-#             _deep_merge(value, node)
-#         else:
-#             destination[key] = value
-#     return destination
+def _deep_merge(source: dict, destination: dict) -> dict:
+    """Helper to deeply merge dictionaries for temporary state calculation."""
+    for key, value in source.items():
+        if isinstance(value, dict):
+            node = destination.setdefault(key, {})
+            _deep_merge(value, node)
+        else:
+            destination[key] = value
+    return destination
 
 
 # --- Agent Nodes ---
@@ -263,15 +263,18 @@ def run_turn(
     store: ProfileStore | None = None,
     filing_year_override: int | None = None,
 ) -> TurnState:
+    """Initializes and runs the full agent graph for a single turn."""
     if store is None:
         store = ProfileStore()
 
     policy = load_policy()
     groq = GroqAdapter(api_key=None)
     retriever = InMemoryRetriever()
+
     profile = store.get_profile(user_id)
     if filing_year_override:
         profile.data["filing"] = {"filing_year": filing_year_override}
+
     state = TurnState(
         correlation_id=f"turn:{uuid.uuid4().hex[:12]}",
         user_id=user_id,
@@ -279,21 +282,40 @@ def run_turn(
         profile=profile,
     )
 
-    # A bit of reflection to pass the right dependencies to each node
-    nodes = [
-        (node_safety_gate, {"policy": policy}),
-        (node_router, {"groq": groq}),
-        (node_extractor, {"policy": policy}),
-        (node_knowledge_agent, {"retriever": retriever}),
-        (node_calculators, {"policy": policy}),
-        (node_reasoner, {"groq": groq}),
-        (node_critic, {"policy": policy}),
-        (node_action_planner, {"policy": policy}),
-        (node_trace_emitter, {}),
-    ]
+    # FIX: Execute the graph as an explicit, sequential chain of calls.
+    # This is verbose but 100% type-safe and clear.
+    state = node_safety_gate(state, policy)
+    if state.errors:
+        return state
 
-    for node_func, deps in nodes:
-        if state.errors:
-            break
-        state = node_func(state, **deps)
+    state = node_router(state, groq)
+    if state.errors:
+        return state
+
+    state = node_extractor(state, policy)
+    if state.errors:
+        return state
+
+    state = node_knowledge_agent(state, retriever)
+    if state.errors:
+        return state
+
+    state = node_calculators(state, policy)
+    if state.errors:
+        return state
+
+    state = node_reasoner(state, groq)
+    if state.errors:
+        return state
+
+    state = node_critic(state, policy)
+    if state.errors:
+        return state
+
+    state = node_action_planner(state, policy)
+    if state.errors:
+        return state
+
+    state = node_trace_emitter(state)
+
     return state
