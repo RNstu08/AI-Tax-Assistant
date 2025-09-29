@@ -8,20 +8,21 @@ from app.ui.components.audit_panel import render_audit_panel
 from app.ui.components.chat_panel import render_chat_panel
 from app.ui.components.profile_panel import render_profile_panel
 from app.ui.components.receipts_panel import render_receipts_panel
+from app.ui.components.rules_panel import render_rules_panel
 from app.ui.components.settings_panel import render_settings_panel
 from app.ui.components.summary_panel import render_summary_panel
 from app.ui.components.trace_panel import render_trace_panel
 
 
 @st.cache_resource
-def startup() -> None:  # FIX: Add '-> None' return type annotation
+def startup() -> None:
     """Builds the rules index on the first run."""
     build_index()
 
 
 def main() -> None:
     st.set_page_config(page_title="DE Tax Assistant (MVP)", layout="wide")
-    st.title("DE Tax Assistant (MVP scaffold)")
+    st.title("DE Tax Assistant (MVP)")
 
     startup()
 
@@ -34,7 +35,10 @@ def main() -> None:
         render_chat_panel()
 
     with col2:
-        tabs = st.tabs(["Actions", "Trace", "Profile", "Settings"])
+        # This is the final, complete list of tabs up to PR9
+        tabs = st.tabs(
+            ["Actions", "Trace", "Profile", "Summary", "Receipts", "Audit", "Rules", "Settings"]
+        )
         with tabs[0]:
             render_actions_panel(st.session_state["last_result"])
         with tabs[1]:
@@ -48,6 +52,8 @@ def main() -> None:
         with tabs[5]:
             render_audit_panel(st.session_state["last_result"])
         with tabs[6]:
+            render_rules_panel(st.session_state["last_result"])
+        with tabs[7]:
             render_settings_panel()
 
 
