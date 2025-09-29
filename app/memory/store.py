@@ -1,15 +1,22 @@
-from __future__ import annotations
-
 import json
 import sqlite3
 import time
 from dataclasses import asdict
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.safety.files import sanitize_filename, sha256_hex, validate_file
+
+
+# This class should be defined only ONCE at the top of the file.
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, Decimal):
+            return str(o)
+        return super().default(o)
 
 
 class ProfileSnapshot(BaseModel):
@@ -282,45 +289,47 @@ class ProfileStore:
             meta["id"] = cur.lastrowid
         return meta
 
+    def get_attachment(self, attachment_id: int) -> dict | None:
+        with _connect(self.sqlite_path) as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                "SELECT * FROM evidence_files WHERE id = ?", (attachment_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def list_attachments(self, user_id: str, limit: int = 100) -> list[dict]:
         with _connect(self.sqlite_path) as con:
-            # FIX: Reformat long SQL string
-            cur = con.execute(
-                (
-                    "SELECT id, filename, content_type, size_bytes, sha256, category, created_at "
-                    "FROM evidence_files WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
-                ),
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT * FROM evidence_files WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
                 (user_id, limit),
-            )
-            rows = cur.fetchall()
-            cols = [description[0] for description in cur.description]
-            return [dict(zip(cols, row, strict=False)) for row in rows]
+            ).fetchall()
+            return [dict(row) for row in rows]
 
-    def list_actions(self, user_id: str, limit: int = 100) -> list[dict]:
-        with _connect(self.sqlite_path) as con:
-            cur = con.execute(
-                "SELECT * FROM actions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                (user_id, limit),
-            )
-            rows = cur.fetchall()
-            cols = [description[0] for description in cur.description]
-            return [dict(zip(cols, row, strict=False)) for row in rows]
+    # def list_actions(self, user_id: str, limit: int = 100) -> list[dict]:
+    #     with _connect(self.sqlite_path) as con:
+    #         cur = con.execute(
+    #             "SELECT * FROM actions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+    #             (user_id, limit),
+    #         )
+    #         rows = cur.fetchall()
+    #         cols = [description[0] for description in cur.description]
+    #         return [dict(zip(cols, row, strict=False)) for row in rows]
 
-    def list_evidence(self, user_id: str, limit: int = 100) -> list[dict]:
-        with _connect(self.sqlite_path) as con:
-            cur = con.execute(
-                "SELECT * FROM evidence WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                (user_id, limit),
-            )
-            rows = cur.fetchall()
-            cols = [description[0] for description in cur.description]
-            return [dict(zip(cols, row, strict=False)) for row in rows]
+    # def list_evidence(self, user_id: str, limit: int = 100) -> list[dict]:
+    #     with _connect(self.sqlite_path) as con:
+    #         cur = con.execute(
+    #             "SELECT * FROM evidence WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+    #             (user_id, limit),
+    #         )
+    #         rows = cur.fetchall()
+    #         cols = [description[0] for description in cur.description]
+    #         return [dict(zip(cols, row, strict=False)) for row in rows]
 
     def save_receipt_parse(
         self, user_id: str, attachment_id: int, text: str, parsed_data: Any, engine: str
     ) -> int:
         """Saves the result of an OCR parse to the database."""
-        # Convert dataclass/pydantic model to a serializable dict
         if hasattr(parsed_data, "model_dump"):
             serializable_data = parsed_data.model_dump()
         elif hasattr(parsed_data, "__dict__"):
@@ -338,7 +347,7 @@ class ProfileStore:
                     attachment_id,
                     user_id,
                     text,
-                    json.dumps(serializable_data),
+                    json.dumps(serializable_data, cls=DecimalEncoder),
                     engine,
                     _utc_ms(),
                 ),
@@ -349,14 +358,12 @@ class ProfileStore:
         """Retrieves the most recent parse for a given attachment ID."""
         with _connect(self.sqlite_path) as con:
             con.row_factory = sqlite3.Row
-            cur = con.execute(
-                (
-                    "SELECT * FROM receipt_parses WHERE attachment_id = ? "
-                    "ORDER BY created_at DESC LIMIT 1"
-                ),
+            # FIX: Reformat long SQL string
+            row = con.execute(
+                "SELECT * FROM receipt_parses WHERE attachment_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
                 (attachment_id,),
-            )
-            row = cur.fetchone()
+            ).fetchone()
             if not row:
                 return None
 
