@@ -11,14 +11,14 @@ from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore, _deep_merge
 from app.nlu.quantities import parse_line_items
-from app.orchestrator.safety import patch_allowed_by_policy  # FIX: Add missing import
+from app.orchestrator.safety import patch_allowed_by_policy
 from app.safety.policy import SafetyPolicy, load_policy
 from tools.calculators import (
     calc_commute,
     calc_equipment_item,
     calc_home_office,
 )
-from tools.money import D, fmt_eur, parse_eur_amounts
+from tools.money import D, fmt_eur
 
 from .models import (
     ActionProposal,
@@ -62,43 +62,28 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("extractor")
     text = state.user_input.lower()
     patch: dict[str, Any] = {}
-    amounts = parse_eur_amounts(state.user_input)
 
     if m := re.search(r"(\d+)\s*km", text):
         patch.setdefault("deductions", {})["commute_km_per_day"] = int(m.group(1))
-
     if m := re.search(r"(\d+)\s*(?:work\s*days|days|tage)", text):
         patch.setdefault("deductions", {})["work_days_per_year"] = int(m.group(1))
-
     if m := re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text):
         patch.setdefault("deductions", {})["home_office_days"] = int(m.group(1))
 
-    if "laptop" in text or "equipment" in text or amounts:
-        if amounts:
-            items = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
-            fy = state.profile.data.get("filing", {}).get("filing_year", date.today().year)
-            items.append(
-                {
-                    "amount_gross_eur": str(amounts[0]),
-                    "purchase_date": date(fy, 6, 15).isoformat(),
-                    "has_receipt": True,
-                }
-            )
-
-    # NLU Pass
     nlu_items = parse_line_items(state.user_input)
     if nlu_items:
-        patch.setdefault("deductions", {}).setdefault("equipment_items", [])
+        equipment_list = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
         fy = state.profile.data.get("filing", {}).get("filing_year", date.today().year)
         for item in nlu_items:
-            patch["deductions"]["equipment_items"].append(
-                {
-                    "amount_gross_eur": item["total_eur"],
-                    "purchase_date": date(fy, 6, 15).isoformat(),
-                    "has_receipt": True,
-                }
-            )
-
+            for _ in range(item.get("quantity", 1)):
+                equipment_list.append(
+                    {
+                        "amount_gross_eur": item["unit_price_eur"],
+                        "purchase_date": date(fy, 6, 15).isoformat(),
+                        "has_receipt": True,
+                        "description": item["description"],
+                    }
+                )
     if patch:
         state.patch_proposal = PatchProposal(patch=patch, rationale="Extracted from user input.")
     return state
@@ -137,7 +122,6 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
         if res.get("amount_eur"):
             state.calc_results["home_office"] = res
 
-    # FIX: Restore the missing logic to calculate equipment items
     if "equipment_items" in deductions:
         total_equip = D(0)
         for i, item in enumerate(deductions["equipment_items"]):
@@ -152,7 +136,6 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
                 total_equip += res["amount_eur"]
         if total_equip > 0:
             state.calc_results["equipment_total"] = {"amount_eur": total_equip}
-
     return state
 
 
@@ -247,17 +230,6 @@ def apply_ui_action(
         state.committed_action = CommitResult(
             action_id=prop.action_id, committed=True, version_after=new_snapshot.version
         )
-    # new handler for 'set_preferences'
-    elif ui_action.kind == "set_preferences":
-        patch = {"preferences": ui_action.payload}
-        new_snapshot, diff = store.apply_patch(user_id, patch)
-        action_id = f"set_preferences:{uuid.uuid4().hex[:8]}"
-        store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)
-        state.profile = new_snapshot
-        state.profile_diff = [FieldDiff(**d) for d in diff]
-        state.committed_action = CommitResult(
-            action_id=action_id, committed=True, version_after=new_snapshot.version
-        )
     elif ui_action.kind == "undo":
         try:
             new_snapshot = store.undo_action(user_id, f"undo:{uuid.uuid4().hex[:8]}")
@@ -273,7 +245,9 @@ def run_turn(
     store: ProfileStore | None = None,
     filing_year_override: int | None = None,
 ) -> TurnState:
-    store = store or ProfileStore()
+    if store is None:
+        store = ProfileStore()
+
     policy = load_policy()
     groq = GroqAdapter(api_key=None)
     retriever = InMemoryRetriever()

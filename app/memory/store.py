@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,12 @@ class ProfileStore:
                 size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
                 category TEXT, turn_id TEXT, created_at INTEGER NOT NULL,
                 path TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS receipt_parses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, attachment_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL, text TEXT, parsed_data TEXT, engine TEXT,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(attachment_id) REFERENCES evidence_files(id)
             );
             """
         )
@@ -308,3 +315,51 @@ class ProfileStore:
             rows = cur.fetchall()
             cols = [description[0] for description in cur.description]
             return [dict(zip(cols, row, strict=False)) for row in rows]
+
+    def save_receipt_parse(
+        self, user_id: str, attachment_id: int, text: str, parsed_data: Any, engine: str
+    ) -> int:
+        """Saves the result of an OCR parse to the database."""
+        # Convert dataclass/pydantic model to a serializable dict
+        if hasattr(parsed_data, "model_dump"):
+            serializable_data = parsed_data.model_dump()
+        elif hasattr(parsed_data, "__dict__"):
+            serializable_data = asdict(parsed_data)
+        else:
+            serializable_data = parsed_data
+
+        with _connect(self.sqlite_path) as con:
+            cur = con.execute(
+                (
+                    "INSERT INTO receipt_parses (attachment_id, user_id, text, "
+                    "parsed_data, engine, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    attachment_id,
+                    user_id,
+                    text,
+                    json.dumps(serializable_data),
+                    engine,
+                    _utc_ms(),
+                ),
+            )
+            return cur.lastrowid or 0
+
+    def get_receipt_parse_by_attachment(self, attachment_id: int) -> dict | None:
+        """Retrieves the most recent parse for a given attachment ID."""
+        with _connect(self.sqlite_path) as con:
+            con.row_factory = sqlite3.Row
+            cur = con.execute(
+                (
+                    "SELECT * FROM receipt_parses WHERE attachment_id = ? "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ),
+                (attachment_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            parse = dict(row)
+            parse["parsed_data"] = json.loads(parse["parsed_data"])
+            return parse

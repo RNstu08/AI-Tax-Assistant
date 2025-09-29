@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import io
+from typing import Any
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    Flowable,  # FIX: Import the base class 'Flowable'
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from app.i18n.microcopy import t
 from app.memory.store import ProfileStore
+from app.orchestrator.models import TurnState
 from app.reports.summary import ReportSummary, build_summary
 
 
-def _on_page(canvas, doc):
+def _on_page(canvas: Any, doc: Any) -> None:
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.grey)
@@ -24,7 +33,9 @@ def _on_page(canvas, doc):
 def generate_pdf_bytes(summary: ReportSummary) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm)
-    styles, story = getSampleStyleSheet(), []
+    styles = getSampleStyleSheet()
+    # FIX: Type the story as a list of the general 'Flowable' type
+    story: list[Flowable] = []
 
     lang = summary.language
     story.append(Paragraph(t(lang, "pdf_title"), styles["Title"]))
@@ -69,9 +80,8 @@ def generate_pdf_bytes(summary: ReportSummary) -> bytes:
     return buf.getvalue()
 
 
-def export_pdf_and_log(user_id: str, state, store: ProfileStore) -> tuple[bytes, int]:
+def export_pdf_and_log(user_id: str, state: TurnState, store: ProfileStore) -> tuple[bytes, int]:
     summary = build_summary(state)
     pdf_bytes = generate_pdf_bytes(summary)
-    # Logging evidence of the export is a crucial audit step
-    # We will implement this logging in a future PR to keep this step focused
-    return pdf_bytes, 0  # Returning a placeholder evidence ID
+    # Logging evidence will be added in a future step
+    return pdf_bytes, 0

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
 from app.memory.store import ProfileStore
+from app.ocr.runner import run_ocr_on_attachment
 from app.orchestrator.models import TurnState
 
 
@@ -36,9 +39,21 @@ def render_receipts_panel(state: TurnState | None) -> None:
                 st.error(f"Failed to upload {file.name}: {e}")
 
     st.markdown("---")
-    st.markdown("**Your Uploaded Files**")
+    st.markdown("**Process Uploaded Files**")
     attachments = store.list_attachments(state.user_id)
-    if not attachments:
-        st.write("No files uploaded yet.")
-    else:
-        st.dataframe(attachments)
+    for attachment in attachments:
+        with st.expander(f"File: {attachment['filename']}"):
+            cols = st.columns([3, 1])
+            cols[0].write(
+                f"Category: {attachment['category']}, Size: {attachment['size_bytes'] // 1024} KB"
+            )
+            if cols[1].button("Run OCR", key=f"ocr_{attachment['id']}"):
+                with st.spinner("Performing OCR..."):
+                    run_ocr_on_attachment(store, attachment["id"])
+
+            # Display parsed results if they exist
+            parsed = store.get_receipt_parse_by_attachment(attachment["id"])
+            if parsed:
+                st.caption(f"Parsed with: {parsed['engine']}")
+                st.code(json.dumps(parsed["parsed_data"]["items"], indent=2), language="json")
+                # In a full app, we'd add an "Import" button here
