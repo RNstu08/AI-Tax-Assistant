@@ -3,11 +3,12 @@ from __future__ import annotations
 import streamlit as st
 
 from app.memory.store import ProfileStore
+from app.orchestrator.models import TurnState  # FIX: Add the missing import
 from app.reports.pdf import export_pdf_and_log
-from app.reports.summary import build_summary  # FIX: Add the missing import
+from app.reports.summary import build_summary
 
 
-def render_summary_panel(state) -> None:
+def render_summary_panel(state: TurnState | None) -> None:
     """Renders the summary panel with itemization, checklist, and export button."""
     st.subheader("Summary and Export")
     if not (state and state.calc_results):
@@ -15,9 +16,7 @@ def render_summary_panel(state) -> None:
         return
 
     summary = build_summary(state)
-
     st.metric("Total Estimated Deduction", summary.totals_eur)
-
     st.dataframe(summary.itemization)
 
     with st.expander("Receipts & Evidence Checklist"):

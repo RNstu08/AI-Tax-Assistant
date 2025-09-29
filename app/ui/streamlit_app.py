@@ -4,8 +4,10 @@ import streamlit as st
 
 from app.knowledge.ingest import build_index
 from app.ui.components.actions_panel import render_actions_panel
+from app.ui.components.audit_panel import render_audit_panel
 from app.ui.components.chat_panel import render_chat_panel
 from app.ui.components.profile_panel import render_profile_panel
+from app.ui.components.receipts_panel import render_receipts_panel
 from app.ui.components.settings_panel import render_settings_panel
 from app.ui.components.summary_panel import render_summary_panel
 from app.ui.components.trace_panel import render_trace_panel
@@ -42,6 +44,10 @@ def main() -> None:
         with tabs[3]:
             render_summary_panel(st.session_state["last_result"])
         with tabs[4]:
+            render_receipts_panel(st.session_state["last_result"])
+        with tabs[5]:
+            render_audit_panel(st.session_state["last_result"])
+        with tabs[6]:
             render_settings_panel()
 
 
