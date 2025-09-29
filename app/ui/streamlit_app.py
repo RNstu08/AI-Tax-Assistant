@@ -7,6 +7,7 @@ from app.ui.components.actions_panel import render_actions_panel
 from app.ui.components.chat_panel import render_chat_panel
 from app.ui.components.profile_panel import render_profile_panel
 from app.ui.components.settings_panel import render_settings_panel
+from app.ui.components.summary_panel import render_summary_panel
 from app.ui.components.trace_panel import render_trace_panel
 
 
@@ -39,6 +40,8 @@ def main() -> None:
         with tabs[2]:
             render_profile_panel(st.session_state["last_result"])
         with tabs[3]:
+            render_summary_panel(st.session_state["last_result"])
+        with tabs[4]:
             render_settings_panel()
 
 
