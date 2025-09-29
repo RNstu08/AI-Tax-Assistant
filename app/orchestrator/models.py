@@ -63,10 +63,13 @@ class ErrorItem(BaseModel):
 
 
 class TurnState(BaseModel):
+    # Inputs
     correlation_id: str
     user_id: str
     user_input: str
     profile: ProfileSnapshot
+
+    # Intermediate artifacts
     intent: str = "deduction"
     category_hint: str | None = None
     retrieval_query: str = ""
@@ -77,6 +80,11 @@ class TurnState(BaseModel):
     critic_flags: list[str] = []
     disclaimer: str = ""
     calc_results: dict[str, Any] = Field(default_factory=dict)
+
+    # FIX: Add the missing 'citations' field
+    citations: list[str] = []
+
+    # Final outputs for the UI
     answer_revised: str = ""
     proposed_actions: list[ActionProposal] = []
     trace: DecisionTrace = DecisionTrace()
