@@ -10,6 +10,7 @@ from typing import Any
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore, _deep_merge
+from app.nlu.quantities import parse_line_items
 from app.orchestrator.safety import patch_allowed_by_policy  # FIX: Add missing import
 from app.safety.policy import SafetyPolicy, load_policy
 from tools.calculators import (
@@ -79,6 +80,20 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
             items.append(
                 {
                     "amount_gross_eur": str(amounts[0]),
+                    "purchase_date": date(fy, 6, 15).isoformat(),
+                    "has_receipt": True,
+                }
+            )
+
+    # NLU Pass
+    nlu_items = parse_line_items(state.user_input)
+    if nlu_items:
+        patch.setdefault("deductions", {}).setdefault("equipment_items", [])
+        fy = state.profile.data.get("filing", {}).get("filing_year", date.today().year)
+        for item in nlu_items:
+            patch["deductions"]["equipment_items"].append(
+                {
+                    "amount_gross_eur": item["total_eur"],
                     "purchase_date": date(fy, 6, 15).isoformat(),
                     "has_receipt": True,
                 }
