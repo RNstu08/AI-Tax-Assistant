@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 
 def lang_detect(text: str) -> str:
@@ -25,6 +26,11 @@ MC: dict[str, dict[str, str]] = {
         "checklist_home_office": "Home office days log",
         "checklist_equipment": "Equipment invoices/receipts",
         "checklist_general": "Keep all records for your final tax declaration.",
+        "settings_title": "Settings",
+        "language": "Language",
+        "rules_browser_title": "Rule Browser",
+        "search": "Search",
+        "year_filter": "Year filter (optional)",
     },
     "de": {
         "pdf_title": "DE Steuer-Assistent — Aufgliederte Zusammenfassung",
@@ -38,13 +44,18 @@ MC: dict[str, dict[str, str]] = {
         "checklist_home_office": "Nachweis der Home-Office-Tage",
         "checklist_equipment": "Rechnungen/Belege für Arbeitsmittel",
         "checklist_general": "Bewahren Sie alle Unterlagen für Ihre Steuererklärung auf.",
+        "settings_title": "Einstellungen",
+        "language": "Sprache",
+        "rules_browser_title": "Regel-Browser",
+        "search": "Suche",
+        "year_filter": "Jahr filtern (optional)",
     },
 }
 
 
-def t(lang: str, key: str, default: str | None = None, **kwargs) -> str:
+def t(lang: str, key: str, default: str | None = None, **kwargs: Any) -> str:
     """A simple translation function."""
-    table = MC.get(lang, MC["en"])  # Default to English
+    table = MC.get(lang, MC["en"])
     s = table.get(key, default or key)
     try:
         return s.format(**kwargs)

@@ -2,14 +2,46 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.i18n.microcopy import t
+from app.infra.config import AppSettings
+from app.memory.store import ProfileStore
+from app.orchestrator.graph import apply_ui_action
+from app.orchestrator.models import TurnState, UIAction
 
-def render_settings_panel() -> None:
-    st.subheader("Session Settings")
-    year_options = [2024, 2025]
-    current_year = st.session_state.get("filing_year_override", 2025)
-    selected_year = st.selectbox(
-        "Override Filing Year for this Session",
-        options=year_options,
-        index=year_options.index(current_year),
+
+def render_settings_panel(state: TurnState | None) -> None:
+    """Renders the panel for managing persistent user preferences."""
+    if not state:
+        st.info("Start a chat to manage settings.")
+        return
+
+    # Determine the language for the UI labels themselves
+    ui_lang = state.profile.data.get("preferences", {}).get("language", "auto")
+    if ui_lang == "auto":
+        ui_lang = "en"  # Default UI to English if preference is auto
+
+    st.subheader(t(ui_lang, "settings_title"))
+
+    # Get current preferences from the profile, with safe defaults
+    prefs = state.profile.data.get("preferences", {})
+    current_lang = prefs.get("language", "auto")
+
+    # Language Selector
+    lang = st.selectbox(
+        label=t(ui_lang, "language"),
+        options=["auto", "en", "de"],
+        index=["auto", "en", "de"].index(current_lang),
     )
-    st.session_state["filing_year_override"] = selected_year
+
+    if st.button("Save Settings"):
+        action = UIAction(kind="set_preferences", payload={"language": lang})
+        # We need a store instance to apply the action
+        store = ProfileStore(AppSettings().sqlite_path)
+        new_state = apply_ui_action(state.user_id, action, state, store)
+
+        st.session_state["last_result"] = new_state
+        if new_state.errors:
+            st.error(f"Failed to save: {new_state.errors[0].message}")
+        else:
+            st.success("Settings saved.")
+            st.rerun()

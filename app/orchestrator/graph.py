@@ -232,6 +232,17 @@ def apply_ui_action(
         state.committed_action = CommitResult(
             action_id=prop.action_id, committed=True, version_after=new_snapshot.version
         )
+    # new handler for 'set_preferences'
+    elif ui_action.kind == "set_preferences":
+        patch = {"preferences": ui_action.payload}
+        new_snapshot, diff = store.apply_patch(user_id, patch)
+        action_id = f"set_preferences:{uuid.uuid4().hex[:8]}"
+        store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)
+        state.profile = new_snapshot
+        state.profile_diff = [FieldDiff(**d) for d in diff]
+        state.committed_action = CommitResult(
+            action_id=action_id, committed=True, version_after=new_snapshot.version
+        )
     elif ui_action.kind == "undo":
         try:
             new_snapshot = store.undo_action(user_id, f"undo:{uuid.uuid4().hex[:8]}")
