@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from dataclasses import asdict
@@ -355,3 +356,36 @@ class ProfileStore:
                 (user_id, limit),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def get_all_user_ids(self) -> list[str]:
+        with _connect(self.sqlite_path) as con:
+            rows = con.execute("SELECT user_id FROM profiles").fetchall()
+            return [row[0] for row in rows]
+
+    def delete_attachments_older_than(self, user_id: str, cutoff_ms: int) -> int:
+        with _connect(self.sqlite_path) as con:
+            # First, find files on disk to delete
+            rows = con.execute(
+                "SELECT path FROM evidence_files WHERE user_id = ? AND created_at < ?",
+                (user_id, cutoff_ms),
+            ).fetchall()
+            for row in rows:
+                try:
+                    os.remove(row[0])
+                except OSError:
+                    pass  # Ignore if file is already gone
+
+            # Then, delete the records from the database
+            cur = con.execute(
+                "DELETE FROM evidence_files WHERE user_id = ? AND created_at < ?",
+                (user_id, cutoff_ms),
+            )
+            return cur.rowcount or 0
+
+    def delete_evidence_older_than(self, user_id: str, cutoff_ms: int) -> int:
+        with _connect(self.sqlite_path) as con:
+            cur = con.execute(
+                "DELETE FROM evidence WHERE user_id = ? AND created_at < ?",
+                (user_id, cutoff_ms),
+            )
+            return cur.rowcount or 0
