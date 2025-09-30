@@ -1,5 +1,4 @@
 param()
-# Stop script on any error
 $ErrorActionPreference = "Stop"
 
 # Activate the virtual environment
@@ -10,7 +9,10 @@ if (Test-Path $venvActivate) {
     Write-Error "Could not find the virtual environment activation script at $venvActivate"
 }
 
-# Placeholder: In PR1, we just run tests to verify setup.
-# In PR4, this will be replaced with 'streamlit run ...'
-Write-Host "Running tests as a placeholder..."
-pytest -q
+# Ensure the rules index is built before starting
+Write-Host "Building knowledge base index..."
+python -m app.knowledge.ingest
+
+# FIX: Launch the Streamlit application instead of running tests
+Write-Host "Launching Streamlit UI... Open the URL in your browser. (Stop with Ctrl+C)"
+python -m streamlit run app/ui/streamlit_app.py --server.headless true

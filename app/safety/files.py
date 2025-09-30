@@ -8,10 +8,15 @@ MAX_BYTES = 7 * 1024 * 1024  # 7 MB
 
 
 def sanitize_filename(name: str) -> str:
-    """Strips dangerous characters, replaces spaces, and truncates a filename."""
+    """Strips dangerous characters, replaces spaces, and provides a default if empty."""
     name = name.replace(" ", "_")
     name = re.sub(r"[^A-Za-z0-9._-]", "", name)
-    return name[:80] if len(name) > 80 else name
+
+    # FIX: If sanitization results in an empty or dot-only name, provide a safe default.
+    if not name or name.strip(" .") == "":
+        return "uploaded_file"
+
+    return name[:80]
 
 
 def validate_file(content_type: str | None, size_bytes: int) -> tuple[bool, str]:

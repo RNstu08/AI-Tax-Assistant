@@ -28,39 +28,28 @@ def calc_commute(
         min(km_one_way, D(20)) * c["rate_first_20"]
         + max(km_one_way - D(20), D(0)) * c["rate_after_20"]
     )
-    total = quantize_eur(per_day * D(eligible_days))
-    return {"amount_eur": total}
+    return {"amount_eur": quantize_eur(per_day * D(eligible_days))}
 
 
 def calc_home_office(year: int, home_office_days: int) -> CalcResult:
     c = CONST[year]["home_office"]
     amount = quantize_eur(D(home_office_days) * c["per_day"])
-    caps_applied = []
+    caps = []
     if amount > c["annual_cap"]:
-        amount, caps_applied = c["annual_cap"], ["annual_cap"]
-    return {"amount_eur": amount, "caps_applied": caps_applied}
+        amount, caps = c["annual_cap"], ["annual_cap"]
+    return {"amount_eur": amount, "caps_applied": caps}
 
 
 def calc_equipment_item(
     year: int, amount_gross_eur: Decimal, purchase_date: date, has_receipt: bool
 ) -> CalcResult:
     c = CONST[year]["equipment"]
-    assumptions = [] if has_receipt else ["receipt_missing"]
     if amount_gross_eur <= c["gwg_gross_threshold"]:
         return {
             "amount_eur": quantize_eur(amount_gross_eur),
-            "breakdown": {"method": "immediate_expense"},  # FIX: Add breakdown key
-            "inputs_used": {"amount_gross_eur": str(amount_gross_eur)},
+            "breakdown": {"method": "immediate_expense"},
         }
 
-    useful_life_years = 3
-    months_owned = 13 - purchase_date.month
-    depreciation = quantize_eur(
-        (amount_gross_eur / D(useful_life_years)) * (D(months_owned) / D(12))
-    )
-    return {
-        "amount_eur": depreciation,
-        "breakdown": {"method": "straight_line_afa"},  # FIX: Add breakdown key
-        "inputs_used": {"amount_gross_eur": str(amount_gross_eur)},
-        "assumptions": assumptions + [f"assumed_{useful_life_years}_year_life"],
-    }
+    useful_life, months_owned = 3, 13 - purchase_date.month
+    depreciation = quantize_eur((amount_gross_eur / D(useful_life)) * (D(months_owned) / D(12)))
+    return {"amount_eur": depreciation, "breakdown": {"method": "straight_line_afa"}}

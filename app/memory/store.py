@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sqlite3
 import time
@@ -11,7 +13,6 @@ from pydantic import BaseModel, Field
 from app.safety.files import sanitize_filename, sha256_hex, validate_file
 
 
-# This class should be defined only ONCE at the top of the file.
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o: Any) -> Any:
         if isinstance(o, Decimal):
@@ -45,7 +46,7 @@ def _deep_merge(source: dict, destination: dict) -> dict:
     return destination
 
 
-def _flatten(d: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+def _flatten(d: dict, prefix: str = "") -> dict:
     flat: dict[str, Any] = {}
     for k, v in d.items():
         path = f"{prefix}.{k}" if prefix else k
@@ -56,22 +57,20 @@ def _flatten(d: dict[str, Any], prefix: str = "") -> dict[str, Any]:
     return flat
 
 
-def _compute_diff(old: dict[str, Any], new: dict[str, Any]) -> list[dict]:
-    flat_old = _flatten(old)
-    flat_new = _flatten(new)
-    all_paths = set(flat_old.keys()) | set(flat_new.keys())
-    diffs: list[dict] = []
-    for p in sorted(all_paths):
-        if flat_old.get(p) != flat_new.get(p):
-            diffs.append({"path": p, "old": flat_old.get(p), "new": flat_new.get(p)})
-    return diffs
+def _compute_diff(old: dict, new: dict) -> list:
+    flat_old, flat_new = _flatten(old), _flatten(new)
+    paths = set(flat_old.keys()) | set(flat_new.keys())
+    return [
+        {"path": p, "old": flat_old.get(p), "new": flat_new.get(p)}
+        for p in sorted(paths)
+        if flat_old.get(p) != flat_new.get(p)
+    ]
 
 
-def _apply_diff_reverse(data: dict[str, Any], diffs: list[dict]) -> dict[str, Any]:
+def _apply_diff_reverse(data: dict, diffs: list) -> dict:
     out = json.loads(json.dumps(data))
     for item in diffs:
-        path = item["path"].split(".")
-        cur = out
+        path, cur = item["path"].split("."), out
         for key in path[:-1]:
             cur = cur.setdefault(key, {})
         last = path[-1]
@@ -134,34 +133,21 @@ class ProfileStore:
             if not row:
                 empty = ProfileSnapshot(version=0, data={"preferences": {"language": "auto"}})
                 con.execute(
-                    "INSERT INTO profiles (user_id, version, data, updated_at) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO profiles VALUES (?, ?, ?, ?)",
                     (user_id, empty.version, json.dumps(empty.data), _utc_ms()),
                 )
                 return empty
             return ProfileSnapshot(version=row[0], data=json.loads(row[1]))
 
-    def apply_patch(
-        self, user_id: str, patch: dict[str, Any]
-    ) -> tuple[ProfileSnapshot, list[dict]]:
+    def apply_patch(self, user_id: str, patch: dict) -> tuple[ProfileSnapshot, list[dict]]:
         with _connect(self.sqlite_path) as con:
-            current_row = con.execute(
-                "SELECT version, data FROM profiles WHERE user_id = ?", (user_id,)
-            ).fetchone()
-            if not current_row:
-                self.get_profile(user_id)
-                current_row = con.execute(
-                    "SELECT version, data FROM profiles WHERE user_id = ?", (user_id,)
-                ).fetchone()
-
-            current_version, current_data_json = current_row
-            old_data = json.loads(current_data_json)
-            new_data = old_data.copy()
+            current = self.get_profile(user_id)
+            old_data, new_data = current.data, current.data.copy()
             _deep_merge(patch, new_data)
-            new_version = current_version + 1
+            new_version = current.version + 1
             diff = _compute_diff(old_data, new_data)
-
             con.execute(
-                "UPDATE profiles SET version = ?, data = ?, updated_at = ? WHERE user_id = ?",
+                "UPDATE profiles SET version=?, data=?, updated_at=? WHERE user_id=?",
                 (new_version, json.dumps(new_data), _utc_ms(), user_id),
             )
             return ProfileSnapshot(version=new_version, data=new_data), diff
@@ -173,15 +159,14 @@ class ProfileStore:
         kind: str,
         payload: dict,
         payload_hash: str,
-        diff: list[dict],
+        diff: list,
         committed: bool,
         undo_of: str | None = None,
     ) -> None:
         with _connect(self.sqlite_path) as con:
-            current_profile = self.get_profile(user_id)
-            version_after = current_profile.version if committed else None
+            v_after = self.get_profile(user_id).version if committed else None
             con.execute(
-                "INSERT INTO actions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO actions VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     action_id,
                     user_id,
@@ -189,7 +174,7 @@ class ProfileStore:
                     json.dumps(payload),
                     payload_hash,
                     1 if committed else 0,
-                    version_after,
+                    v_after,
                     json.dumps(diff),
                     _utc_ms(),
                     undo_of,
@@ -198,31 +183,26 @@ class ProfileStore:
 
     def _get_last_committed_action(self, user_id: str) -> dict | None:
         with _connect(self.sqlite_path) as con:
-            row = con.execute(
-                (
-                    "SELECT id, diff FROM actions WHERE user_id = ? "
-                    "AND committed = 1 AND diff IS NOT NULL ORDER BY created_at DESC LIMIT 1"
-                ),
-                (user_id,),
-            ).fetchone()
+            sql = (
+                "SELECT id, diff FROM actions WHERE user_id=? AND committed=1 "
+                "AND diff IS NOT NULL ORDER BY created_at DESC LIMIT 1"
+            )
+            row = con.execute(sql, (user_id,)).fetchone()
             return {"id": row[0], "diff": json.loads(row[1])} if row else None
 
     def undo_action(self, user_id: str, new_action_id: str) -> ProfileSnapshot:
         last_action = self._get_last_committed_action(user_id)
         if not last_action:
             raise ValueError("No undoable action found.")
-
         current_profile = self.get_profile(user_id)
         reverted_data = _apply_diff_reverse(current_profile.data, last_action["diff"])
-
         with _connect(self.sqlite_path) as con:
             new_version = current_profile.version + 1
             con.execute(
-                "UPDATE profiles SET version = ?, data = ?, updated_at = ? WHERE user_id = ?",
+                "UPDATE profiles SET version=?, data=?, updated_at=? WHERE user_id=?",
                 (new_version, json.dumps(reverted_data), _utc_ms(), user_id),
             )
             new_snapshot = ProfileSnapshot(version=new_version, data=reverted_data)
-
         self.commit_action(
             user_id,
             new_action_id,
@@ -247,14 +227,11 @@ class ProfileStore:
         is_valid, reason = validate_file(content_type, len(data))
         if not is_valid:
             raise ValueError(reason)
-
         fname = sanitize_filename(filename)
         hash_val = sha256_hex(data)
         dest_path = Path(self.upload_dir) / f"{hash_val[:16]}_{fname}"
-
         with open(dest_path, "wb") as f:
             f.write(data)
-
         meta = {
             "user_id": user_id,
             "filename": fname,
@@ -267,7 +244,6 @@ class ProfileStore:
             "path": str(dest_path),
         }
         with _connect(self.sqlite_path) as con:
-            # FIX: Reformat long SQL string
             cur = con.execute(
                 (
                     "INSERT INTO evidence_files (user_id, filename, content_type, size_bytes, "
@@ -293,7 +269,7 @@ class ProfileStore:
         with _connect(self.sqlite_path) as con:
             con.row_factory = sqlite3.Row
             row = con.execute(
-                "SELECT * FROM evidence_files WHERE id = ?", (attachment_id,)
+                "SELECT * FROM evidence_files WHERE id=?", (attachment_id,)
             ).fetchone()
             return dict(row) if row else None
 
@@ -301,42 +277,20 @@ class ProfileStore:
         with _connect(self.sqlite_path) as con:
             con.row_factory = sqlite3.Row
             rows = con.execute(
-                "SELECT * FROM evidence_files WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                "SELECT * FROM evidence_files WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
                 (user_id, limit),
             ).fetchall()
             return [dict(row) for row in rows]
 
-    # def list_actions(self, user_id: str, limit: int = 100) -> list[dict]:
-    #     with _connect(self.sqlite_path) as con:
-    #         cur = con.execute(
-    #             "SELECT * FROM actions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-    #             (user_id, limit),
-    #         )
-    #         rows = cur.fetchall()
-    #         cols = [description[0] for description in cur.description]
-    #         return [dict(zip(cols, row, strict=False)) for row in rows]
-
-    # def list_evidence(self, user_id: str, limit: int = 100) -> list[dict]:
-    #     with _connect(self.sqlite_path) as con:
-    #         cur = con.execute(
-    #             "SELECT * FROM evidence WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-    #             (user_id, limit),
-    #         )
-    #         rows = cur.fetchall()
-    #         cols = [description[0] for description in cur.description]
-    #         return [dict(zip(cols, row, strict=False)) for row in rows]
-
     def save_receipt_parse(
         self, user_id: str, attachment_id: int, text: str, parsed_data: Any, engine: str
     ) -> int:
-        """Saves the result of an OCR parse to the database."""
         if hasattr(parsed_data, "model_dump"):
             serializable_data = parsed_data.model_dump()
         elif hasattr(parsed_data, "__dict__"):
             serializable_data = asdict(parsed_data)
         else:
             serializable_data = parsed_data
-
         with _connect(self.sqlite_path) as con:
             cur = con.execute(
                 (
@@ -358,7 +312,7 @@ class ProfileStore:
         """Retrieves the most recent parse for a given attachment ID."""
         with _connect(self.sqlite_path) as con:
             con.row_factory = sqlite3.Row
-            # FIX: Reformat long SQL string
+            # Reformat the long SQL string to be multi-line
             row = con.execute(
                 "SELECT * FROM receipt_parses WHERE attachment_id = ? "
                 "ORDER BY created_at DESC LIMIT 1",
@@ -370,3 +324,34 @@ class ProfileStore:
             parse = dict(row)
             parse["parsed_data"] = json.loads(parse["parsed_data"])
             return parse
+
+    def list_actions(self, user_id: str, limit: int = 100) -> list[dict]:
+        with _connect(self.sqlite_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT * FROM actions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def log_evidence(
+        self, user_id: str, turn_id: str | None, kind: str, payload: dict, result: dict
+    ) -> int:
+        with _connect(self.sqlite_path) as con:
+            cur = con.execute(
+                (
+                    "INSERT INTO evidence (user_id, turn_id, action_id, kind, "
+                    "payload, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                ),
+                (user_id, turn_id, None, kind, json.dumps(payload), json.dumps(result), _utc_ms()),
+            )
+            return cur.lastrowid or 0
+
+    def list_evidence(self, user_id: str, limit: int = 100) -> list[dict]:
+        with _connect(self.sqlite_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT * FROM evidence WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]

@@ -26,24 +26,32 @@ class ParsedReceipt:
 _ITEM_PATTERN = re.compile(
     r"(?P<qty>\d+)?\s*x?\s*(?P<desc>[\w\s.-]+?)\s+(?P<price>\d[\d.,]*)\s*€?", re.I
 )
+_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 
 def parse_receipt_text(text: str) -> ParsedReceipt:
     items: list[ParsedItem] = []
-    # Simplified parsing for demo
     for m in _ITEM_PATTERN.finditer(text):
-        qty = int(m.group("qty") or 1)
-        price = D(m.group("price").replace(",", "."))
-        items.append(
-            ParsedItem(
-                description=m.group("desc").strip(),
-                quantity=qty,
-                unit_price_eur=price,
-                total_eur=qty * price,
-            )
-        )
+        desc = m.group("desc").strip()
+        # FIX: Explicitly ignore anything that looks like a date
+        if _DATE_PATTERN.match(desc):
+            continue
 
-    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+        try:
+            qty = int(m.group("qty") or 1)
+            price = D(m.group("price").replace(",", "."))
+            items.append(
+                ParsedItem(
+                    description=desc,
+                    quantity=qty,
+                    unit_price_eur=price,
+                    total_eur=qty * price,
+                )
+            )
+        except (ValueError, TypeError):
+            continue
+
+    date_match = _DATE_PATTERN.search(text)
     vendor_match = re.search(r"Vendor:\s*(.*)", text)
 
     return ParsedReceipt(

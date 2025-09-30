@@ -31,14 +31,26 @@ no_implicit_optional = true
 pretty = true
 exclude = ["tests/", ".venv", ".data"]
 
+# 'overrides' syntax for mypy configuration
+[[tool.mypy.overrides]]
+module = [
+    "fitz",
+    "pytesseract",
+    "PIL.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-# FIX: This tells pytest to look for packages in the root directory.
+# This tells pytest to look for packages in the root directory.
 pythonpath = ["."]
 
-# FIX: This tells the installer to find both the 'app' and 'tools' packages.
+# This tells the installer to find both the 'app' and 'tools' packages.
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*", "tools*"]
 exclude = ["tests*"]
+
+[[tool.mypy.per-file-ignores]]
+"app/ocr/*.py" = ["import-untyped"]

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import re
 import uuid
@@ -7,7 +5,8 @@ from datetime import date
 from hashlib import sha256
 from typing import Any
 
-from app.i18n.microcopy import lang_detect, t  # Add t to imports
+# FIX: Import 'resolve_language' and REMOVE 'lang_detect'
+from app.i18n.microcopy import CopyKey, resolve_language, t
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore, _deep_merge
@@ -44,7 +43,7 @@ def node_safety_gate(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("safety_gate")
     if any(w in state.user_input.lower() for w in ["freelancer", "austria"]):
         state.errors.append(ErrorItem(code="out_of_scope", message="Query is out of scope."))
-    state.disclaimer = "Informational only; not tax advice. Please verify with official guidance."
+    state.disclaimer = t("en", CopyKey.DISCLAIMER)
     return state
 
 
@@ -70,6 +69,10 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
         patch.setdefault("deductions", {})["work_days_per_year"] = int(m.group(1))
     if m := re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text):
         patch.setdefault("deductions", {})["home_office_days"] = int(m.group(1))
+    if m := re.search(r"(\d+)\s*mi(les)?\b", text):
+        miles = int(m.group(1))
+        km = round(miles * 1.60934)  # Convert and round to nearest km
+        patch.setdefault("deductions", {})["commute_km_per_day"] = km
 
     nlu_items = parse_line_items(state.user_input)
     if nlu_items:
@@ -141,25 +144,21 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 
 def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
-    lang = resolve_language(state)
-    state.disclaimer = t(lang, "disclaimer")
     state.trace.nodes_run.append("reasoner")
+    # This call now correctly uses the imported 'resolve_language' function
+    lang = resolve_language(state)
+    state.disclaimer = t(lang, CopyKey.DISCLAIMER)
     state.citations = [h.rule_id for h in state.rule_hits]
-    lines = [f"This is a response about '{state.intent}'."]
+    lines = []
     if state.rule_hits:
         lines.append("Relevant rules found:")
         for hit in state.rule_hits:
             lines.append(f"- {hit.title} [{hit.rule_id}]")
-
     if state.calc_results:
-        lines.append("\n**Estimated Amounts:**")
+        lines.append(f"\n**{t(lang, CopyKey.ESTIMATED_AMOUNTS)}:**")
         for key, res in state.calc_results.items():
             if "total" not in key and "amount_eur" in res:
                 lines.append(f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}")
-        if "equipment_total" in state.calc_results:
-            total_str = fmt_eur(state.calc_results["equipment_total"]["amount_eur"])
-            lines.append(f"- **Equipment Total**: {total_str}")
-
     state.answer_draft = "\n".join(lines)
     return state
 
@@ -217,12 +216,12 @@ def node_trace_emitter(state: TurnState) -> TurnState:
     return state
 
 
-def resolve_language(state: TurnState) -> str:
-    """Determines the language for the turn, prioritizing user preference."""
-    pref = state.profile.data.get("preferences", {}).get("language", "auto")
-    if pref in ("en", "de"):
-        return pref
-    return lang_detect(state.user_input)
+# def resolve_language(state: TurnState) -> str:
+#     """Determines the language for the turn, prioritizing user preference."""
+#     pref = state.profile.data.get("preferences", {}).get("language", "auto")
+#     if pref in ("en", "de"):
+#         return pref
+#     return lang_detect(state.user_input)
 
 
 def apply_ui_action(
@@ -256,7 +255,10 @@ def apply_ui_action(
             state.errors.append(ErrorItem(code="undo_failed", message=str(e)))
 
     elif ui_action.kind == "set_preferences":
-        patch = {"preferences": ui_action.payload}
+        current_prefs = last_state.profile.data.get("preferences", {})
+        new_prefs = ui_action.payload or {}
+        patch = {"preferences": {**current_prefs, **new_prefs}}
+
         new_snapshot, diff = store.apply_patch(user_id, patch)
         action_id = f"set_preferences:{uuid.uuid4().hex[:8]}"
         store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)

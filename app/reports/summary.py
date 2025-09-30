@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
-from hashlib import sha256  # FIX: Add the missing import
 from typing import Any
 
-from app.i18n.microcopy import lang_detect, t
+from app.i18n.microcopy import CopyKey, t
 from app.orchestrator.models import TurnState
 from tools.money import D, fmt_eur
 
@@ -40,28 +40,24 @@ def build_receipts_checklist(itemization: list[ItemizedEntry], lang: str = "en")
     checklist_items: list[str] = []
     seen_categories = {entry.category for entry in itemization}
 
-    # In a real app, these keys would be more robust
+    # FIX: Use the CopyKey enum for all calls to the 't' function
     if "commuting" in seen_categories:
-        checklist_items.append(
-            t(lang, "checklist_commuting", default="Commuting documents (tickets, logbook)")
-        )
+        checklist_items.append(t(lang, CopyKey.CHECKLIST_COMMUTING))
     if "home_office" in seen_categories:
-        checklist_items.append(t(lang, "checklist_home_office", default="Home office days log"))
+        checklist_items.append(t(lang, CopyKey.CHECKLIST_HOME_OFFICE))
     if any("equipment" in cat for cat in seen_categories):
-        checklist_items.append(
-            t(lang, "checklist_equipment", default="Equipment invoices/receipts")
-        )
+        checklist_items.append(t(lang, CopyKey.CHECKLIST_EQUIPMENT))
 
-    checklist_items.append(
-        t(lang, "checklist_general", default="Keep all records for your final tax declaration.")
-    )
-    return list(dict.fromkeys(checklist_items))  # Deduplicate
+    checklist_items.append(t(lang, CopyKey.CHECKLIST_GENERAL))
+    return list(dict.fromkeys(checklist_items))  # Deduplicate while preserving order
 
 
 def build_summary(state: TurnState) -> ReportSummary:
     """Builds a structured summary object from the final turn state."""
     lang = state.profile.data.get("preferences", {}).get("language", "auto")
     if lang == "auto":
+        from app.i18n.microcopy import lang_detect
+
         lang = lang_detect(state.user_input)
 
     entries: list[ItemizedEntry] = []
@@ -80,7 +76,7 @@ def build_summary(state: TurnState) -> ReportSummary:
             )
 
     content_to_hash = f"{state.correlation_id}{total}{''.join(state.citations)}"
-    content_hash = sha256(content_to_hash.encode()).hexdigest()[:12]
+    content_hash = hashlib.sha256(content_to_hash.encode()).hexdigest()[:12]
 
     return ReportSummary(
         user_id=state.user_id,
