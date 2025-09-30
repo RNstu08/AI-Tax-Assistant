@@ -18,6 +18,7 @@ def render_receipts_panel(state: TurnState | None) -> None:
         return
 
     store = ProfileStore()
+
     category = st.selectbox(
         "Assign Category for New Uploads",
         options=["equipment", "donations", "general"],
@@ -78,26 +79,35 @@ def render_receipts_panel(state: TurnState | None) -> None:
                 st.caption(f"Processed with: `{parsed['engine']}`")
                 with st.form(key=f"import_form_{attachment['id']}"):
                     st.write("**Parsed Items (Select to Import into Profile):**")
-                    items_to_import = []
-                    for i, item in enumerate(parsed["parsed_data"]["items"]):
+                    items_from_parse = parsed["parsed_data"].get("items", [])
+                    selected_item_indices = []
+
+                    for i, item in enumerate(items_from_parse):
                         cols = st.columns([1, 4])
                         is_selected = cols[0].checkbox(
-                            "", key=f"select_{attachment['id']}_{i}", value=True
+                            " ",
+                            key=f"select_{attachment['id']}_{i}",
+                            value=True,
+                            label_visibility="collapsed",
                         )
-                        # Use the correct variable 'cols[1]' instead of 'col2'
-                        cols[1].text(f"{item['description']} - {item['total_eur']}€")
+                        cols[1].text(
+                            f"{item.get('description', 'N/A')} - {item.get('total_eur', '0.00')}€"
+                        )
                         if is_selected:
-                            items_to_import.append(i)
+                            selected_item_indices.append(i)
 
                     submitted = st.form_submit_button("✅ Import Selected Items")
                     if submitted:
                         payload = {
                             "attachment_id": attachment["id"],
-                            "item_indices": items_to_import,
+                            "item_indices": selected_item_indices,
                         }
                         action = UIAction(kind="import_parsed_items", payload=payload)
 
                         new_state = apply_ui_action(state.user_id, action, state, store)
                         st.session_state["last_result"] = new_state
-                        st.success(f"Imported {len(items_to_import)} items!")
-                        st.info("Ask for a new estimate in the Chat tab to see the impact.")
+                        st.success(
+                            f"Imported {len(selected_item_indices)} items! "
+                            "Ask for a new estimate in the Chat tab."
+                        )
+                        st.rerun()
