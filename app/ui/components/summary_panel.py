@@ -9,7 +9,6 @@ from app.reports.summary import build_summary
 
 
 def render_summary_panel(state: TurnState | None) -> None:
-    """Renders the summary panel with itemization, checklist, and export button."""
     st.subheader("Summary and Export")
     if not (state and state.calc_results):
         st.info("Chat about some deductions to generate a summary.")
@@ -24,7 +23,9 @@ def render_summary_panel(state: TurnState | None) -> None:
             st.write(f"- {item}")
 
     if st.button("Export PDF"):
-        pdf_bytes, _ = export_pdf_and_log(state.user_id, state, ProfileStore())
+        # FIX: Create a store instance to pass to the export function
+        store = ProfileStore()
+        pdf_bytes, _ = export_pdf_and_log(state.user_id, state, store)
         st.download_button(
             label="Download PDF",
             data=pdf_bytes,

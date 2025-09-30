@@ -35,7 +35,6 @@ def main() -> None:
         render_chat_panel()
 
     with col2:
-        # This is the final, complete list of tabs up to PR9
         tabs = st.tabs(
             ["Actions", "Trace", "Profile", "Summary", "Receipts", "Audit", "Rules", "Settings"]
         )
@@ -54,7 +53,7 @@ def main() -> None:
         with tabs[6]:
             render_rules_panel(st.session_state["last_result"])
         with tabs[7]:
-            render_settings_panel()
+            render_settings_panel(st.session_state["last_result"])
 
 
 if __name__ == "__main__":

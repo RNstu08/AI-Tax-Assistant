@@ -6,30 +6,48 @@ from app.orchestrator.graph import run_turn
 
 
 def render_chat_panel() -> None:
-    """Renders the chat input and streams the assistant's response."""
+    """Renders the main chat interface with history and input form."""
     st.subheader("Chat")
 
-    # Use a form to handle user input
+    # Initialize chat history in session state if it doesn't exist
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Display past messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Chat input form
     with st.form("chat_form", clear_on_submit=True):
-        # FIX: Break long default value string to satisfy line-length limit
-        default_prompt = "I commute 30 km and worked from home 100 days in 2025."
         user_text = st.text_area(
             "Your message:",
-            value=st.session_state.get("last_input", default_prompt),
-            height=100,
-            help="Ask about your deductions (DE employee, 2024–2025).",
+            placeholder="Ask about your deductions, e.g., 'I commute 30km for 220 days.'",
+            key="chat_input",  # Use a key to help Streamlit manage state
         )
         submitted = st.form_submit_button("Send")
 
     if submitted and user_text:
-        st.session_state["last_input"] = user_text
-        filing_year = st.session_state.get("filing_year_override")
-
+        # Add user message to history and display it
+        st.session_state.messages.append({"role": "user", "content": user_text})
         with st.chat_message("user"):
             st.markdown(user_text)
 
+        # Get assistant response
         with st.chat_message("assistant"):
-            placeholder = st.empty()
-            result = run_turn(user_id="demo", user_text=user_text, filing_year_override=filing_year)
-            st.session_state["last_result"] = result
-            placeholder.markdown(result.answer_revised)
+            with st.spinner("Thinking..."):
+                filing_year = st.session_state.get("filing_year_override")
+                result = run_turn(
+                    user_id="demo", user_text=user_text, filing_year_override=filing_year
+                )
+                st.session_state["last_result"] = result
+                st.markdown(result.answer_revised)
+                # Add assistant response to history
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": result.answer_revised}
+                )
+
+        # Rerun to clear the input form correctly after processing
+        st.rerun()
+
+    st.caption("Examples: 'I worked from home 150 days in 2024', 'I bought a laptop for 900€'")

@@ -7,12 +7,16 @@ from app.knowledge.rules_service import RulesService
 
 
 def render_rules_panel(state) -> None:
-    lang = state.profile.data.get("preferences", {}).get("language", "auto") if state else "en"
+    lang = state.profile.data.get("preferences", {}).get("language", "en") if state else "en"
     st.subheader(t(lang, "rules_browser_title"))
     svc = RulesService()
 
-    query = st.text_input(t(lang, "search"))
-    year = st.selectbox(t(lang, "year_filter"), options=[None, 2024, 2025])
+    query = st.text_input(t(lang, "search_rules"))
+    year = st.selectbox(t(lang, "year_filter"), options=[None, 2024, 2025], index=0)
 
     rules = svc.search(query=query, year=year)
-    st.dataframe(rules)
+    for rule in rules:
+        with st.expander(f"{rule.get('title', 'N/A')} ({rule.get('year')})"):
+            st.markdown(f"**ID:** `{rule.get('rule_id')}`")
+            st.markdown(f"**Category:** `{rule.get('category')}`")
+            st.caption(rule.get("summary"))

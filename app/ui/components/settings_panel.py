@@ -14,6 +14,24 @@ def render_settings_panel(state: TurnState | None) -> None:
     if not state:
         st.info("Start a chat to manage settings.")
         return
+    prefs = state.profile.data.get("preferences", {})
+    lang = st.selectbox(
+        "Language",
+        options=["auto", "en", "de"],
+        index=["auto", "en", "de"].index(prefs.get("language", "auto")),
+    )
+    if st.button("Save Settings"):
+        action = UIAction(kind="set_preferences", payload={"language": lang})
+        store = ProfileStore()
+        new_state = apply_ui_action(state.user_id, action, state, store)
+        st.session_state["last_result"] = new_state
+        st.success("Settings saved.")
+        st.rerun()
+    # def render_settings_panel(state: TurnState | None) -> None:
+    #     """Renders the panel for managing persistent user preferences."""
+    #     if not state:
+    #         st.info("Start a chat to manage settings.")
+    #         return
 
     # Determine the language for the UI labels themselves
     ui_lang = state.profile.data.get("preferences", {}).get("language", "auto")
