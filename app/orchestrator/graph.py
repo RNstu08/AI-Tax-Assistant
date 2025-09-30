@@ -31,6 +31,7 @@ from .models import (
     TurnState,
     UIAction,
 )
+from .prompts import REASONER_PROMPT, ROUTER_PROMPT
 
 
 def _hash_payload(obj: dict) -> str:
@@ -50,10 +51,15 @@ def node_safety_gate(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 
 def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
+    """Uses an LLM to determine intent, category, and a search query."""
     state.trace.nodes_run.append("router")
-    messages = [{"role": "user", "content": state.user_input}]
-    res = groq.json(model="stub-router", messages=messages)
-    state.intent = res.get("intent", "deduction")
+    prompt = ROUTER_PROMPT.format(user_input=state.user_input)
+    messages = [{"role": "user", "content": prompt}]
+
+    # Use a small, fast model for routing
+    res = groq.json(model="llama3-8b-8192", messages=messages)
+
+    state.intent = res.get("intent", "question")
     state.category_hint = res.get("category_hint")
     state.retrieval_query = res.get("retrieval_query", state.user_input)
     return state
@@ -161,29 +167,35 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 
 def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
-    """Generates a human-readable summary of the turn's findings."""
+    """Uses an LLM to synthesize a final answer from all available context."""
     state.trace.nodes_run.append("reasoner")
     lang = resolve_language(state)
     state.disclaimer = t(lang, CopyKey.DISCLAIMER)
-    state.citations = [h.rule_id for h in state.rule_hits]
 
-    lines = []
+    # Build the context for the LLM
+    rules_context = "\n".join([f"- {h.title}: {h.snippet}" for h in state.rule_hits])
+    calc_context = "\n".join(
+        [
+            f"- {k.replace('_', ' ')}: {fmt_eur(v['amount_eur'])}"
+            for k, v in (state.calc_results or {}).items()
+            if "total" not in k
+        ]
+    )
 
-    # Add relevant rules if any were found
-    if state.rule_hits:
-        lines.append("Relevant rules found:")
-        for hit in state.rule_hits:
-            lines.append(f"- {hit.title} [{hit.rule_id}]")
+    system_prompt = REASONER_PROMPT.format(
+        language="German" if lang == "de" else "English",
+        filing_year=state.profile.data.get("filing", {}).get("filing_year", 2025),
+        rules_context=rules_context or "No specific rules found.",
+        calculations_context=calc_context or "No calculations were performed.",
+    )
 
-    # FIX: Use simple, robust logic to display ALL calculations that were made.
-    if state.calc_results:
-        lines.append(f"\n**{t(lang, CopyKey.ESTIMATED_AMOUNTS)}:**")
-        for key, res in sorted(state.calc_results.items()):
-            if "total" not in key and "amount_eur" in res:
-                amount_str = fmt_eur(res["amount_eur"])
-                lines.append(f"- {key.replace('_', ' ').title()}: {amount_str}")
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": state.user_input},
+    ]
 
-    state.answer_draft = "\n".join(lines)
+    # Use a larger, more capable model for reasoning
+    state.answer_draft = groq.chat(model="llama3-70b-8192", messages=messages)
     return state
 
 
@@ -251,9 +263,11 @@ def node_trace_emitter(state: TurnState) -> TurnState:
 def apply_ui_action(
     user_id: str, ui_action: UIAction, last_state: TurnState, store: ProfileStore
 ) -> TurnState:
+    """Applies a UI-triggered action, handles database writes, and returns an updated state."""
     policy = load_policy()
     state = last_state.model_copy(deep=True)
     proposals = {p.action_id: p for p in state.proposed_actions}
+
     if ui_action.kind == "confirm" and ui_action.ref_action in proposals:
         prop = proposals[ui_action.ref_action]
         allowed, why = patch_allowed_by_policy(prop.payload, policy)
@@ -269,8 +283,8 @@ def apply_ui_action(
         state.committed_action = CommitResult(
             action_id=prop.action_id, committed=True, version_after=new_snapshot.version
         )
-        # Clear the proposed actions so they can't be clicked again.
         state.proposed_actions = []
+
     elif ui_action.kind == "undo":
         try:
             new_snapshot = store.undo_action(user_id, f"undo:{uuid.uuid4().hex[:8]}")
@@ -288,11 +302,7 @@ def apply_ui_action(
         store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)
         state.profile = new_snapshot
     elif ui_action.kind == "import_parsed_items":
-        if not (
-            ui_action.payload
-            and "attachment_id" in ui_action.payload
-            and "item_indices" in ui_action.payload
-        ):
+        if not (ui_action.payload and "attachment_id" in ui_action.payload):
             state.errors.append(
                 ErrorItem(code="invalid_payload", message="Import action is missing data.")
             )
@@ -310,31 +320,39 @@ def apply_ui_action(
             "filing_year", date.today().year
         )
 
-        for index in ui_action.payload["item_indices"]:
+        item_indices = ui_action.payload.get("item_indices", [])
+        for index in item_indices:
             try:
                 item = parsed_record["parsed_data"]["items"][index]
                 items_to_add.append(
                     {
                         "description": item["description"],
                         "amount_gross_eur": item["total_eur"],
-                        "purchase_date": date(
-                            filing_year, 6, 15
-                        ).isoformat(),  # Use a deterministic date for now
+                        "purchase_date": date(filing_year, 6, 15).isoformat(),
                         "has_receipt": True,
                     }
                 )
             except (IndexError, KeyError):
-                continue  # Skip if an invalid index is passed
+                continue
 
         if items_to_add:
-            # We construct a patch to add the new items to the existing list
-            patch = {"deductions": {"equipment_items": items_to_add}}
+            # FIX: Get the existing items and append the new ones.
+            current_profile = store.get_profile(user_id)
+            existing_items = current_profile.data.get("deductions", {}).get("equipment_items", [])
+            updated_items = existing_items + items_to_add
+            patch = {"deductions": {"equipment_items": updated_items}}
+
             new_snapshot, diff = store.apply_patch(user_id, patch)
             action_id = f"import_items:{uuid.uuid4().hex[:8]}"
             store.commit_action(
                 user_id, action_id, "import_parsed_items", ui_action.payload, "", diff, True
             )
             state.profile = new_snapshot
+            state.proposed_actions = []
+            state.committed_action = CommitResult(
+                action_id=action_id, committed=True, version_after=new_snapshot.version
+            )
+
     return state
 
 
