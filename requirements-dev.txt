@@ -13,3 +13,4 @@ pre-commit>=3.7
 streamlit>=1.37.0
 reportlab>=4.2.0
 # types-reportlab
+groq>=0.5.0

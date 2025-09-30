@@ -17,4 +17,7 @@ class AppSettings(BaseSettings):
     chroma_path: str = ".data/chroma"
     log_level: str = "INFO"
     enable_json_logs: bool = True
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
+    # model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
+
+    # Load from a .env file
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
