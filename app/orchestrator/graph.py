@@ -7,6 +7,7 @@ from datetime import date
 from hashlib import sha256
 from typing import Any
 
+from app.i18n.microcopy import lang_detect, t  # Add t to imports
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore, _deep_merge
@@ -140,6 +141,8 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 
 def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
+    lang = resolve_language(state)
+    state.disclaimer = t(lang, "disclaimer")
     state.trace.nodes_run.append("reasoner")
     state.citations = [h.rule_id for h in state.rule_hits]
     lines = [f"This is a response about '{state.intent}'."]
@@ -177,9 +180,11 @@ def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
     state.trace.nodes_run.append("action_planner")
     if state.rule_hits:
         payload = {"rules": [h.rule_id for h in state.rule_hits]}
+        # Add a UUID to ensure the action ID is always unique
+        action_id = f"compute_estimate:{uuid.uuid4().hex[:8]}"
         state.proposed_actions.append(
             ActionProposal(
-                action_id=f"compute_estimate:{_hash_payload(payload)}",
+                action_id=action_id,
                 kind="compute_estimate",
                 payload=payload,
                 payload_hash=_hash_payload(payload),
@@ -188,11 +193,14 @@ def node_action_planner(state: TurnState, policy: SafetyPolicy) -> TurnState:
                 requires_confirmation=False,
             )
         )
+    # Conditionally propose a profile patch if one was generated
     if state.patch_proposal:
         payload = state.patch_proposal.patch
+        # Add a UUID to ensure the action ID is always unique
+        action_id = f"confirm_profile_patch:{uuid.uuid4().hex[:8]}"
         state.proposed_actions.append(
             ActionProposal(
-                action_id=f"confirm_profile_patch:{_hash_payload(payload)}",
+                action_id=action_id,
                 kind="confirm_profile_patch",
                 payload=payload,
                 payload_hash=_hash_payload(payload),
@@ -207,6 +215,14 @@ def node_trace_emitter(state: TurnState) -> TurnState:
     state.trace.nodes_run.append("trace_emitter")
     state.trace.disclaimers.append(state.disclaimer)
     return state
+
+
+def resolve_language(state: TurnState) -> str:
+    """Determines the language for the turn, prioritizing user preference."""
+    pref = state.profile.data.get("preferences", {}).get("language", "auto")
+    if pref in ("en", "de"):
+        return pref
+    return lang_detect(state.user_input)
 
 
 def apply_ui_action(
@@ -230,12 +246,21 @@ def apply_ui_action(
         state.committed_action = CommitResult(
             action_id=prop.action_id, committed=True, version_after=new_snapshot.version
         )
+        # Clear the proposed actions so they can't be clicked again.
+        state.proposed_actions = []
     elif ui_action.kind == "undo":
         try:
             new_snapshot = store.undo_action(user_id, f"undo:{uuid.uuid4().hex[:8]}")
             state.profile = new_snapshot
         except ValueError as e:
             state.errors.append(ErrorItem(code="undo_failed", message=str(e)))
+
+    elif ui_action.kind == "set_preferences":
+        patch = {"preferences": ui_action.payload}
+        new_snapshot, diff = store.apply_patch(user_id, patch)
+        action_id = f"set_preferences:{uuid.uuid4().hex[:8]}"
+        store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)
+        state.profile = new_snapshot
     return state
 
 
@@ -245,9 +270,7 @@ def run_turn(
     store: ProfileStore | None = None,
     filing_year_override: int | None = None,
 ) -> TurnState:
-    if store is None:
-        store = ProfileStore()
-
+    store = store or ProfileStore()
     policy = load_policy()
     groq = GroqAdapter(api_key=None)
     retriever = InMemoryRetriever()
