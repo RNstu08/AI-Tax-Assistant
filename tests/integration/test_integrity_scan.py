@@ -1,8 +1,14 @@
+import base64
 import uuid
 from pathlib import Path
 
 from app.maintenance.integrity_scan import run_integrity_scan
 from app.memory.store import ProfileStore
+
+# A valid, 1x1 transparent PNG image represented as bytes.
+TINY_PNG_BYTES = base64.b64decode(
+    b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+)
 
 
 def test_integrity_scan_clean(tmp_path: Path):
@@ -12,9 +18,9 @@ def test_integrity_scan_clean(tmp_path: Path):
     )
     user_id = f"user_{uuid.uuid4().hex}"
 
-    # Log some events and add a file
     store.log_evidence(user_id, "turn1", "test_event", {"data": "A"}, {"ok": True})
-    store.add_attachment(user_id, "receipt.txt", "text/plain", b"file content", "general", "turn1")
+    # FIX: Use an allowed file type (image/png) for the test attachment
+    store.add_attachment(user_id, "receipt.png", "image/png", TINY_PNG_BYTES, "general", "turn1")
 
     report = run_integrity_scan(store, user_id)
     assert not report["issues"]
@@ -27,8 +33,9 @@ def test_integrity_scan_tampered_file(tmp_path: Path):
     )
     user_id = f"user_{uuid.uuid4().hex}"
 
+    # FIX: Use an allowed file type (image/png)
     meta = store.add_attachment(
-        user_id, "receipt.txt", "text/plain", b"original content", "general", "turn1"
+        user_id, "receipt.png", "image/png", TINY_PNG_BYTES, "general", "turn1"
     )
 
     # Tamper with the file on disk after it has been saved
