@@ -11,6 +11,7 @@ from app.i18n.microcopy import CopyKey, resolve_language, t
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
 from app.memory.store import ProfileStore, _deep_merge
+from app.nlu.context import EntityMemory
 from app.nlu.quantities import parse_line_items
 from app.orchestrator.safety import patch_allowed_by_policy
 from app.safety.policy import SafetyPolicy, load_policy
@@ -58,11 +59,19 @@ def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
     return state
 
 
-def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
+def node_extractor(state: TurnState, policy: SafetyPolicy, nlu_memory: EntityMemory) -> TurnState:
     """Extracts data from user input and creates a PatchProposal if data is found."""
     state.trace.nodes_run.append("extractor")
     text = state.user_input.lower()
     patch: dict[str, Any] = {}
+
+    # --- PRONOUN RESOLUTION ---
+    # Try to resolve pronouns for equipment first
+    resolved_item = nlu_memory.resolve(text, kind_hint="equipment_item")
+    if resolved_item:
+        # If we found a pronoun, treat it as a new item of the same type
+        equipment_list = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
+        equipment_list.append(resolved_item["data"])
 
     # FIX: Use a final, robust method to find all numbers and their context
     if m := re.search(r"(\d+)\s*km", text):
@@ -89,17 +98,16 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
     nlu_items = parse_line_items(state.user_input)
     if nlu_items:
         equipment_list = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
-        fy = state.profile.data.get("filing", {}).get("filing_year", date.today().year)
         for item in nlu_items:
+            # Remember each new item we find
+            item_data = {
+                "amount_gross_eur": item["unit_price_eur"],
+                "description": item["description"],
+            }
+            nlu_memory.remember({"kind": "equipment_item", "data": item_data})
+            # Expand quantities as before
             for _ in range(item.get("quantity", 1)):
-                equipment_list.append(
-                    {
-                        "amount_gross_eur": item["unit_price_eur"],
-                        "purchase_date": date(fy, 6, 15).isoformat(),
-                        "has_receipt": True,
-                        "description": item["description"],
-                    }
-                )
+                equipment_list.append(item_data)
 
     print(f"\nDEBUG: Final extracted patch in node_extractor: {patch}\n")
     if patch:
@@ -301,6 +309,8 @@ def run_turn(
     groq = GroqAdapter(api_key=None)
     retriever = InMemoryRetriever()
     profile = store.get_profile(user_id)
+
+    nlu_memory = EntityMemory.from_profile(profile.data)
     if filing_year_override:
         profile.data["filing"] = {"filing_year": filing_year_override}
     state = TurnState(
@@ -335,5 +345,8 @@ def run_turn(
     if state.errors:
         return state
     state = node_trace_emitter(state)
+
+    if nlu_memory.entities:
+        store.apply_patch(user_id, {"nlu_memory": nlu_memory.to_dict()})
 
     return state
