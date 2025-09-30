@@ -60,56 +60,48 @@ def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
 
 
 def node_extractor(state: TurnState, policy: SafetyPolicy, nlu_memory: EntityMemory) -> TurnState:
-    """Extracts data from user input and creates a PatchProposal if data is found."""
     state.trace.nodes_run.append("extractor")
     text = state.user_input.lower()
     patch: dict[str, Any] = {}
 
-    # --- PRONOUN RESOLUTION ---
-    # Try to resolve pronouns for equipment first
-    resolved_item = nlu_memory.resolve(text, kind_hint="equipment_item")
-    if resolved_item:
-        # If we found a pronoun, treat it as a new item of the same type
-        equipment_list = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
-        equipment_list.append(resolved_item["data"])
-
-    # FIX: Use a final, robust method to find all numbers and their context
+    # Standard extractions
     if m := re.search(r"(\d+)\s*km", text):
         patch.setdefault("deductions", {})["commute_km_per_day"] = int(m.group(1))
+    if m := re.search(r"(\d+)\s*(?:work\s*days|days|tage)", text):
+        patch.setdefault("deductions", {})["work_days_per_year"] = int(m.group(1))
+    if m := re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text):
+        patch.setdefault("deductions", {})["home_office_days"] = int(m.group(1))
 
-    # Find all numbers associated with "days"
-    day_matches = re.findall(r"(\d+)\s*days", text)  # -> e.g., ['220', '100']
-
-    # Find the number specifically associated with "home office"
-    ho_days_val = None
-    ho_match = re.search(r"home office.*?(\d+)", text)
-    if ho_match:
-        ho_days_val = int(ho_match.group(1))
-        patch.setdefault("deductions", {})["home_office_days"] = ho_days_val
-
-    # Assume any other "days" number is for the total work days
-    for day_str in day_matches:
-        day_val = int(day_str)
-        if day_val != ho_days_val:
-            patch.setdefault("deductions", {})["work_days_per_year"] = day_val
-            break  # Stop after finding the first non-home-office day count
-
-    # NLU parsing for equipment items
+    # NLU Parsing for equipment, with pronoun resolution
     nlu_items = parse_line_items(state.user_input)
+    resolved_entity = nlu_memory.resolve(text, kind_hint="equipment_item")
+
+    # If a pronoun was used ("another one") and we didn't find a new item in the text
+    if resolved_entity and not nlu_items:
+        # The 'data' from the resolved entity has the same structure as a parsed item
+        nlu_items.append(resolved_entity["data"])
+
     if nlu_items:
         equipment_list = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
-        for item in nlu_items:
-            # Remember each new item we find
-            item_data = {
-                "amount_gross_eur": item["unit_price_eur"],
-                "description": item["description"],
-            }
-            nlu_memory.remember({"kind": "equipment_item", "data": item_data})
-            # Expand quantities as before
-            for _ in range(item.get("quantity", 1)):
-                equipment_list.append(item_data)
+        filing_year = state.filing_year_override or state.profile.data.get("filing", {}).get(
+            "filing_year", date.today().year
+        )
 
-    print(f"\nDEBUG: Final extracted patch in node_extractor: {patch}\n")
+        for item in nlu_items:
+            # FIX: Remember the entire parsed item, which has the correct structure
+            nlu_memory.remember({"kind": "equipment_item", "data": item})
+
+            # This loop now correctly processes items from both the parser and the memory
+            for _ in range(item.get("quantity", 1)):
+                equipment_list.append(
+                    {
+                        "amount_gross_eur": item["unit_price_eur"],
+                        "purchase_date": date(filing_year, 6, 15).isoformat(),
+                        "has_receipt": True,
+                        "description": item["description"],
+                    }
+                )
+
     if patch:
         state.patch_proposal = PatchProposal(patch=patch, rationale="Extracted from user input.")
     return state
@@ -304,12 +296,15 @@ def run_turn(
     store: ProfileStore | None = None,
     filing_year_override: int | None = None,
 ) -> TurnState:
+    """Initializes and runs the full agent graph for a single turn."""
     store = store or ProfileStore()
     policy = load_policy()
     groq = GroqAdapter(api_key=None)
     retriever = InMemoryRetriever()
+
     profile = store.get_profile(user_id)
 
+    # Initialize EntityMemory from the profile at the start of the turn
     nlu_memory = EntityMemory.from_profile(profile.data)
     if filing_year_override:
         profile.data["filing"] = {"filing_year": filing_year_override}
@@ -326,7 +321,7 @@ def run_turn(
     state = node_router(state, groq)
     if state.errors:
         return state
-    state = node_extractor(state, policy)
+    state = node_extractor(state, policy, nlu_memory)
     if state.errors:
         return state
     state = node_knowledge_agent(state, retriever)

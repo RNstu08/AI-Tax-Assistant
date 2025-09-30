@@ -22,11 +22,7 @@ def run_integrity_scan(store: ProfileStore, user_id: str) -> dict:
         expected_hash = sha256(ev["payload"].encode()).hexdigest()
         if ev["payload_hash"] != expected_hash:
             report["issues"].append(
-                {
-                    "type": "evidence_hash_mismatch",
-                    "id": ev["id"],
-                    "kind": ev["kind"],
-                }
+                {"type": "evidence_hash_mismatch", "id": ev["id"], "kind": ev["kind"]}
             )
 
     # 2. Verify attachment file hashes
