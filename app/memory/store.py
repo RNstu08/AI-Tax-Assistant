@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -108,7 +109,9 @@ class ProfileStore:
             CREATE TABLE IF NOT EXISTS evidence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
                 turn_id TEXT, action_id TEXT, kind TEXT NOT NULL,
-                payload TEXT, result TEXT, created_at INTEGER NOT NULL
+                payload TEXT,
+                payload_hash TEXT, /* FIX: Add column for hash */
+                result TEXT, created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS evidence_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
@@ -338,15 +341,27 @@ class ProfileStore:
     def log_evidence(
         self, user_id: str, turn_id: str | None, kind: str, payload: dict, result: dict
     ) -> int:
+        """Logs a read-only event, now including a hash of the payload for integrity."""
         with _connect(self.sqlite_path) as con:
+            payload_str = json.dumps(payload, sort_keys=True)
+            payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
             cur = con.execute(
                 (
-                    "INSERT INTO evidence (user_id, turn_id, action_id, kind, "
-                    "payload, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO evidence (user_id, turn_id, kind, payload, "
+                    "payload_hash, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
                 ),
-                (user_id, turn_id, None, kind, json.dumps(payload), json.dumps(result), _utc_ms()),
+                (user_id, turn_id, kind, payload_str, payload_hash, json.dumps(result), _utc_ms()),
             )
             return cur.lastrowid or 0
+
+    def get_all_evidence_for_scan(self, user_id: str) -> list[dict]:
+        """Fetches all evidence records for a user for an integrity scan."""
+        with _connect(self.sqlite_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT id, kind, payload, payload_hash FROM evidence WHERE user_id = ?", (user_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def list_evidence(self, user_id: str, limit: int = 100) -> list[dict]:
         with _connect(self.sqlite_path) as con:
