@@ -12,11 +12,16 @@ from app.orchestrator.models import TurnState, UIAction
 def render_actions_panel(state: TurnState | None) -> None:
     """Renders the panel for proposed actions with confirm/decline buttons."""
     st.subheader("Actions")
-    if not (state and state.proposed_actions):
-        st.info(
-            "Action committed, or no new actions proposed. "
-            "See the 'Profile' and 'Audit' tabs for history."
+    # Show a persistent message if an action was just committed
+    if state and state.committed_action and state.committed_action.committed:
+        st.success(
+            f"Profile updated to version {state.profile.version}! ✅ "
+            "You can see the change in the 'Profile' tab."
         )
+        return
+
+    if not (state and state.proposed_actions):
+        st.info("Send a message in the Chat tab to see proposed actions.")
         return
 
     if "last_result" not in st.session_state:
@@ -37,7 +42,7 @@ def render_actions_panel(state: TurnState | None) -> None:
                     st.session_state["last_result"] = new_state
                     st.success(f"Profile updated to version {new_state.profile.version}! ✅")
                     st.info(
-                        "View the changes in the 'Profile' tab and the record of this "
-                        "action in the 'Audit' tab."
+                        "View the changes in the 'Profile' tab and the record of "
+                        "this action in the 'Audit' tab."
                     )
                     st.rerun()

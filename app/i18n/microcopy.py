@@ -53,6 +53,8 @@ class CopyKey(str, Enum):
     DISTANCE_UNIT = "distance_unit"
     CONSENT_OCR = "consent_ocr"
     RETENTION_TITLE = "retention_title"
+    RETENTION_ATTACHMENTS_DAYS = "retention_attachments_days"
+    RETENTION_EVIDENCE_DAYS = "retention_evidence_days"
     MAINTENANCE_TITLE = "maintenance_title"
     RUN_CLEANUP = "run_cleanup"
 
@@ -85,6 +87,8 @@ MC: dict[str, dict[CopyKey, str]] = {
         CopyKey.DISTANCE_UNIT: "Distance Unit",
         CopyKey.CONSENT_OCR: ("Allow processing of uploaded receipts (OCR)"),
         CopyKey.RETENTION_TITLE: ("Data Retention (in days, 0 = keep forever)"),
+        CopyKey.RETENTION_ATTACHMENTS_DAYS: "Attachments",
+        CopyKey.RETENTION_EVIDENCE_DAYS: "Audit Logs",
         CopyKey.MAINTENANCE_TITLE: "Maintenance",
         CopyKey.RUN_CLEANUP: "Run Retention Cleanup",
     },
@@ -116,6 +120,8 @@ MC: dict[str, dict[CopyKey, str]] = {
         CopyKey.DISTANCE_UNIT: "Entfernungseinheit",
         CopyKey.CONSENT_OCR: ("Verarbeitung von Belegen erlauben (OCR)"),
         CopyKey.RETENTION_TITLE: ("Aufbewahrungsfristen (in Tagen, 0 = unbegrenzt)"),
+        CopyKey.RETENTION_ATTACHMENTS_DAYS: "Anhänge",
+        CopyKey.RETENTION_EVIDENCE_DAYS: "Prüfprotokolle",
         CopyKey.MAINTENANCE_TITLE: "Wartung",
         CopyKey.RUN_CLEANUP: "Aufbewahrungsbereinigung ausführen",
     },

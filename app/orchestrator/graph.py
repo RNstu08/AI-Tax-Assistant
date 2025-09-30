@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import re
 import uuid
@@ -5,7 +7,6 @@ from datetime import date
 from hashlib import sha256
 from typing import Any
 
-# FIX: Import 'resolve_language' and REMOVE 'lang_detect'
 from app.i18n.microcopy import CopyKey, resolve_language, t
 from app.knowledge.retriever import InMemoryRetriever
 from app.llm.groq_adapter import GroqAdapter
@@ -63,17 +64,28 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
     text = state.user_input.lower()
     patch: dict[str, Any] = {}
 
+    # FIX: Use a final, robust method to find all numbers and their context
     if m := re.search(r"(\d+)\s*km", text):
         patch.setdefault("deductions", {})["commute_km_per_day"] = int(m.group(1))
-    if m := re.search(r"(\d+)\s*(?:work\s*days|days|tage)", text):
-        patch.setdefault("deductions", {})["work_days_per_year"] = int(m.group(1))
-    if m := re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text):
-        patch.setdefault("deductions", {})["home_office_days"] = int(m.group(1))
-    if m := re.search(r"(\d+)\s*mi(les)?\b", text):
-        miles = int(m.group(1))
-        km = round(miles * 1.60934)  # Convert and round to nearest km
-        patch.setdefault("deductions", {})["commute_km_per_day"] = km
 
+    # Find all numbers associated with "days"
+    day_matches = re.findall(r"(\d+)\s*days", text)  # -> e.g., ['220', '100']
+
+    # Find the number specifically associated with "home office"
+    ho_days_val = None
+    ho_match = re.search(r"home office.*?(\d+)", text)
+    if ho_match:
+        ho_days_val = int(ho_match.group(1))
+        patch.setdefault("deductions", {})["home_office_days"] = ho_days_val
+
+    # Assume any other "days" number is for the total work days
+    for day_str in day_matches:
+        day_val = int(day_str)
+        if day_val != ho_days_val:
+            patch.setdefault("deductions", {})["work_days_per_year"] = day_val
+            break  # Stop after finding the first non-home-office day count
+
+    # NLU parsing for equipment items
     nlu_items = parse_line_items(state.user_input)
     if nlu_items:
         equipment_list = patch.setdefault("deductions", {}).setdefault("equipment_items", [])
@@ -88,6 +100,8 @@ def node_extractor(state: TurnState, policy: SafetyPolicy) -> TurnState:
                         "description": item["description"],
                     }
                 )
+
+    print(f"\nDEBUG: Final extracted patch in node_extractor: {patch}\n")
     if patch:
         state.patch_proposal = PatchProposal(patch=patch, rationale="Extracted from user input.")
     return state
@@ -108,7 +122,10 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
         _deep_merge(state.patch_proposal.patch, temp_profile_data)
 
     deductions = temp_profile_data.get("deductions", {})
-    filing_year = temp_profile_data.get("filing", {}).get("filing_year", 2025)
+    filing_year = state.filing_year_override or temp_profile_data.get("filing", {}).get(
+        "filing_year", 2025
+    )
+    # filing_year = temp_profile_data.get("filing", {}).get("filing_year", 2025)
     state.calc_results = {}
 
     if "commute_km_per_day" in deductions and "work_days_per_year" in deductions:
@@ -144,21 +161,28 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
 
 
 def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
+    """Generates a human-readable summary of the turn's findings."""
     state.trace.nodes_run.append("reasoner")
-    # This call now correctly uses the imported 'resolve_language' function
     lang = resolve_language(state)
     state.disclaimer = t(lang, CopyKey.DISCLAIMER)
     state.citations = [h.rule_id for h in state.rule_hits]
+
     lines = []
+
+    # Add relevant rules if any were found
     if state.rule_hits:
         lines.append("Relevant rules found:")
         for hit in state.rule_hits:
             lines.append(f"- {hit.title} [{hit.rule_id}]")
+
+    # FIX: Use simple, robust logic to display ALL calculations that were made.
     if state.calc_results:
         lines.append(f"\n**{t(lang, CopyKey.ESTIMATED_AMOUNTS)}:**")
-        for key, res in state.calc_results.items():
+        for key, res in sorted(state.calc_results.items()):
             if "total" not in key and "amount_eur" in res:
-                lines.append(f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}")
+                amount_str = fmt_eur(res["amount_eur"])
+                lines.append(f"- {key.replace('_', ' ').title()}: {amount_str}")
+
     state.answer_draft = "\n".join(lines)
     return state
 

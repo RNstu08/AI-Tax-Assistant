@@ -24,7 +24,7 @@ class ParsedReceipt:
 
 
 _ITEM_PATTERN = re.compile(
-    r"(?P<qty>\d+)?\s*x?\s*(?P<desc>[\w\s.-]+?)\s+(?P<price>\d[\d.,]*)\s*€?", re.I
+    r"^(?!\d{4}-\d{2}-\d{2})(?P<desc>.*?)\s+(?P<price>\d[\d.,]*)\s*€?$", re.MULTILINE | re.I
 )
 _DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 

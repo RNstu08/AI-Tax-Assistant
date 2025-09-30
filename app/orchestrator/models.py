@@ -74,6 +74,7 @@ class TurnState(BaseModel):
     category_hint: str | None = None
     retrieval_query: str = ""
     patch_proposal: PatchProposal | None = None
+    filing_year_override: int | None = None
     questions: list[ClarifyingQuestion] = []
     rule_hits: list[RuleHit] = []
     answer_draft: str = ""
