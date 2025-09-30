@@ -358,13 +358,24 @@ class ProfileStore:
             return [dict(row) for row in rows]
 
     def get_all_user_ids(self) -> list[str]:
+        """Retrieves a list of all user_ids in the profiles table."""
         with _connect(self.sqlite_path) as con:
             rows = con.execute("SELECT user_id FROM profiles").fetchall()
             return [row[0] for row in rows]
 
-    def delete_attachments_older_than(self, user_id: str, cutoff_ms: int) -> int:
+    def list_attachments_older_than(self, user_id: str, cutoff_ms: int) -> list[dict]:
+        """Lists attachment records older than a given timestamp for a dry run."""
         with _connect(self.sqlite_path) as con:
-            # First, find files on disk to delete
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT * FROM evidence_files WHERE user_id = ? AND created_at < ?",
+                (user_id, cutoff_ms),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_attachments_older_than(self, user_id: str, cutoff_ms: int) -> int:
+        """Finds and deletes old attachment files and their database records."""
+        with _connect(self.sqlite_path) as con:
             rows = con.execute(
                 "SELECT path FROM evidence_files WHERE user_id = ? AND created_at < ?",
                 (user_id, cutoff_ms),
@@ -375,14 +386,23 @@ class ProfileStore:
                 except OSError:
                     pass  # Ignore if file is already gone
 
-            # Then, delete the records from the database
             cur = con.execute(
                 "DELETE FROM evidence_files WHERE user_id = ? AND created_at < ?",
                 (user_id, cutoff_ms),
             )
             return cur.rowcount or 0
 
+    def list_evidence_older_than(self, user_id: str, cutoff_ms: int) -> list[dict]:
+        """Lists evidence records older than a given timestamp for a dry run."""
+        with _connect(self.sqlite_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT * FROM evidence WHERE user_id = ? AND created_at < ?", (user_id, cutoff_ms)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def delete_evidence_older_than(self, user_id: str, cutoff_ms: int) -> int:
+        """Deletes old evidence records from the database."""
         with _connect(self.sqlite_path) as con:
             cur = con.execute(
                 "DELETE FROM evidence WHERE user_id = ? AND created_at < ?",

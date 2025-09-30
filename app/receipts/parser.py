@@ -24,7 +24,7 @@ class ParsedReceipt:
 
 
 _ITEM_PATTERN = re.compile(
-    r"^(?!\d{4}-\d{2}-\d{2})(?P<desc>.*?)\s+(?P<price>\d[\d.,]*)\s*€?$", re.MULTILINE | re.I
+    r"(?P<qty>\d+)?\s*x?\s*(?P<desc>[\w\s.-]+?)\s+(?P<price>\d[\d.,]*)\s*€?", re.I
 )
 _DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
@@ -33,7 +33,7 @@ def parse_receipt_text(text: str) -> ParsedReceipt:
     items: list[ParsedItem] = []
     for m in _ITEM_PATTERN.finditer(text):
         desc = m.group("desc").strip()
-        # FIX: Explicitly ignore anything that looks like a date
+        # Explicitly ignore anything that looks like a date
         if _DATE_PATTERN.match(desc):
             continue
 

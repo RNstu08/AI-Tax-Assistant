@@ -33,11 +33,7 @@ exclude = ["tests/", ".venv", ".data"]
 
 # 'overrides' syntax for mypy configuration
 [[tool.mypy.overrides]]
-module = [
-    "fitz",
-    "pytesseract",
-    "PIL.*",
-]
+module = ["fitz", "pytesseract", "PIL.*", "reportlab.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
