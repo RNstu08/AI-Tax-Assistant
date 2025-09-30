@@ -287,6 +287,54 @@ def apply_ui_action(
         action_id = f"set_preferences:{uuid.uuid4().hex[:8]}"
         store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)
         state.profile = new_snapshot
+    elif ui_action.kind == "import_parsed_items":
+        if not (
+            ui_action.payload
+            and "attachment_id" in ui_action.payload
+            and "item_indices" in ui_action.payload
+        ):
+            state.errors.append(
+                ErrorItem(code="invalid_payload", message="Import action is missing data.")
+            )
+            return state
+
+        parsed_record = store.get_receipt_parse_by_attachment(ui_action.payload["attachment_id"])
+        if not parsed_record:
+            state.errors.append(
+                ErrorItem(code="parse_not_found", message="OCR parse result not found.")
+            )
+            return state
+
+        items_to_add = []
+        filing_year = last_state.profile.data.get("filing", {}).get(
+            "filing_year", date.today().year
+        )
+
+        for index in ui_action.payload["item_indices"]:
+            try:
+                item = parsed_record["parsed_data"]["items"][index]
+                items_to_add.append(
+                    {
+                        "description": item["description"],
+                        "amount_gross_eur": item["total_eur"],
+                        "purchase_date": date(
+                            filing_year, 6, 15
+                        ).isoformat(),  # Use a deterministic date for now
+                        "has_receipt": True,
+                    }
+                )
+            except (IndexError, KeyError):
+                continue  # Skip if an invalid index is passed
+
+        if items_to_add:
+            # We construct a patch to add the new items to the existing list
+            patch = {"deductions": {"equipment_items": items_to_add}}
+            new_snapshot, diff = store.apply_patch(user_id, patch)
+            action_id = f"import_items:{uuid.uuid4().hex[:8]}"
+            store.commit_action(
+                user_id, action_id, "import_parsed_items", ui_action.payload, "", diff, True
+            )
+            state.profile = new_snapshot
     return state
 
 
