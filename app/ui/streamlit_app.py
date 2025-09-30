@@ -6,6 +6,7 @@ from app.knowledge.ingest import build_index
 from app.ui.components.actions_panel import render_actions_panel
 from app.ui.components.audit_panel import render_audit_panel
 from app.ui.components.chat_panel import render_chat_panel
+from app.ui.components.maintenance_panel import render_maintenance_panel
 from app.ui.components.profile_panel import render_profile_panel
 from app.ui.components.receipts_panel import render_receipts_panel
 from app.ui.components.rules_panel import render_rules_panel
@@ -36,7 +37,17 @@ def main() -> None:
 
     with col2:
         tabs = st.tabs(
-            ["Actions", "Trace", "Profile", "Summary", "Receipts", "Audit", "Rules", "Settings"]
+            [
+                "Actions",
+                "Trace",
+                "Profile",
+                "Summary",
+                "Receipts",
+                "Audit",
+                "Rules",
+                "Settings",
+                "Maintenance",
+            ]
         )
         with tabs[0]:
             render_actions_panel(st.session_state["last_result"])
@@ -54,6 +65,8 @@ def main() -> None:
             render_rules_panel(st.session_state["last_result"])
         with tabs[7]:
             render_settings_panel(st.session_state["last_result"])
+        with tabs[8]:
+            render_maintenance_panel(st.session_state["last_result"])
 
 
 if __name__ == "__main__":

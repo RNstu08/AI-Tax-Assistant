@@ -15,6 +15,8 @@ def render_settings_panel(state: TurnState | None) -> None:
         return
 
     prefs = state.profile.data.get("preferences", {})
+    consent = prefs.get("consent", {})
+    retention = prefs.get("retention", {})
     ui_lang = prefs.get("language", "auto")
     if ui_lang == "auto":
         ui_lang = "en"
@@ -28,8 +30,40 @@ def render_settings_panel(state: TurnState | None) -> None:
         label=t(ui_lang, CopyKey.LANGUAGE), options=["auto", "en", "de"], index=lang_index
     )
 
+    st.markdown("---")
+    st.markdown(t(ui_lang, CopyKey.DISTANCE_UNIT))
+    unit = st.radio(
+        "",
+        options=["km", "mi"],
+        index=0 if prefs.get("distance_unit", "km") == "km" else 1,
+        horizontal=True,
+    )
+
+    st.markdown("---")
+    st.markdown(t(ui_lang, CopyKey.CONSENT_OCR))
+    ocr_consent = st.checkbox(
+        "I agree to let the system process my uploaded receipts.",
+        value=bool(consent.get("ocr", False)),
+    )
+
+    st.markdown("---")
+    st.markdown(t(ui_lang, CopyKey.RETENTION_TITLE))
+    attach_days = st.number_input(
+        "Attachments", min_value=0, value=retention.get("attachments_days", 0)
+    )
+    evidence_days = st.number_input(
+        "Audit Logs", min_value=0, value=retention.get("evidence_days", 0)
+    )
+
     if st.button(t(ui_lang, CopyKey.SAVE_SETTINGS)):
-        action = UIAction(kind="set_preferences", payload={"language": lang})
+        payload = {
+            "language": lang,
+            "distance_unit": unit,
+            "consent": {"ocr": ocr_consent},
+            "retention": {"attachments_days": attach_days, "evidence_days": evidence_days},
+        }
+        action = UIAction(kind="set_preferences", payload=payload)
+        # action = UIAction(kind="set_preferences", payload={"language": lang})
         store = ProfileStore(AppSettings().sqlite_path)
         new_state = apply_ui_action(state.user_id, action, state, store)
 
