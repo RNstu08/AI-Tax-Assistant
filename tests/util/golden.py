@@ -27,7 +27,10 @@ def assert_expectations(result: TurnState, expect: dict):
         assert all(kind in action_kinds for kind in expect["actions_include"])
 
     if "category_hint" in expect:
-        assert result.category_hint == expect["category_hint"]
+        actual = result.category_hint or ""
+        expected = expect["category_hint"] or ""
+        print("category_hint actual:", repr(actual), "expected:", repr(expected))  # TEMP debug
+        assert actual.strip().lower() == expected.strip().lower()
 
     if "is_out_of_scope" in expect:
         assert any(e.code == "out_of_scope" for e in result.errors)

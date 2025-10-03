@@ -8,7 +8,7 @@ def test_imports_and_basic_objects(tmp_path):
     cfg = AppSettings()
     assert cfg.environment == "dev"
     configure_logging(json_logs=True, level="INFO")
-    # FIX: Use correct argument and isolated path
+    # FIX: Use the correct argument 'sqlite_path' and a temporary path
     store = ProfileStore(sqlite_path=str(tmp_path / "test.db"))
     snap = store.get_profile(user_id="u1")
     assert snap.version == 0

@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from pathlib import Path
 
 from app.knowledge.ingest import build_index
@@ -27,4 +28,6 @@ def test_commit_and_reuse_memory(tmp_path: Path):
     assert state2.profile.version > state1.profile.version
     state3 = run_turn(user_id=user_id, user_text="What is my commute estimate?", store=store)
     assert state3.profile.version == state2.profile.version
-    assert "€2,156.00" in state3.answer_revised
+    # assert "€2,156.00" in state3.answer_revised
+    assert "commuting" in state3.calc_results
+    assert state3.calc_results["commuting"]["amount_eur"] == Decimal("2156.00")

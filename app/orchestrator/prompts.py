@@ -5,7 +5,7 @@ ROUTER_PROMPT = """
 You are an expert intent router. Your job is to analyze the user's message and determine
 their primary intent.
 Output a JSON object with the following structure:
-{"intent": "...", "category_hint": "...", "retrieval_query": "..."}
+{{"intent": "...", "category_hint": "...", "retrieval_query": "..."}}
 
 - `intent` can be one of: ["deduction", "question", "chitchat"].
 - `category_hint` can be one of: ["commuting", "home_office", "equipment", "donations", null].

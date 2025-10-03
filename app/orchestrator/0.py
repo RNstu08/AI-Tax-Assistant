@@ -7,7 +7,6 @@ from collections.abc import Callable
 from datetime import date
 from hashlib import sha256
 from typing import Any
-from venv import logger
 
 from app.i18n.microcopy import CopyKey, resolve_language, t
 from app.infra.config import AppSettings
@@ -28,7 +27,6 @@ from tools.money import D, fmt_eur
 
 from .models import (
     ActionProposal,
-    ClarifyingQuestion,
     CommitResult,
     ErrorItem,
     FieldDiff,
@@ -54,67 +52,17 @@ def node_safety_gate(state: TurnState, policy: SafetyPolicy) -> TurnState:
     return state
 
 
-# def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
-#     """Uses an LLM to determine intent, category, and a search query."""
-#     state.trace.nodes_run.append("router")
-#     prompt = ROUTER_PROMPT.format(user_input=state.user_input)
-#     messages = [{"role": "user", "content": prompt}]
-
-#     # FIX: Update to a current, supported model for routing
-#     res = groq.json(model="llama-3.1-8b-instant", messages=messages)
-
-#     state.intent = res.get("intent", "question")
-#     #state.category_hint = res.get("category_hint")
-#     allowed = {"commuting", "home_office", "equipment", "donations"}
-#     raw = res.get("category_hint")
-#     cat = (raw or "").strip().lower()
-#     state.category_hint = cat if cat in allowed else None
-#     state.retrieval_query = res.get("retrieval_query", state.user_input)
-#     return state
-
-
 def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
+    """Uses an LLM to determine intent, category, and a search query."""
     state.trace.nodes_run.append("router")
     prompt = ROUTER_PROMPT.format(user_input=state.user_input)
     messages = [{"role": "user", "content": prompt}]
 
+    # FIX: Update to a current, supported model for routing
     res = groq.json(model="llama-3.1-8b-instant", messages=messages)
 
-    allowed = {"commuting", "home_office", "equipment", "donations"}
-    raw = res.get("category_hint")
-    cat = (raw or "").strip().lower()
-    state.category_hint = cat if cat in allowed else None
-
-    # Fallback: simple keyword matching if router didn’t give a valid category
-    if state.category_hint is None:
-        text = state.user_input.lower()
-        if any(
-            w in text
-            for w in [
-                "equipment",
-                "laptop",
-                "notebook",
-                "computer",
-                "pc",
-                "monitor",
-                "bildschirm",
-                "tastatur",
-                "maus",
-                "arbeitsmittel",
-                "software",
-            ]
-        ):
-            state.category_hint = "equipment"
-        elif any(w in text for w in ["commute", "pendler", "arbeitsweg"]):
-            state.category_hint = "commuting"
-        elif any(w in text for w in ["home office", "homeoffice", "arbeitszimmer"]):
-            state.category_hint = "home_office"
-        elif any(w in text for w in ["spende", "spenden", "gemeinnützig"]):
-            state.category_hint = "donations"
-        state.category_hint = "equipment"  # etc.
-        logger.warning(f"Fallback keyword routing used for input: {state.user_input!r}")
-
     state.intent = res.get("intent", "question")
+    state.category_hint = res.get("category_hint")
     state.retrieval_query = res.get("retrieval_query", state.user_input)
     return state
 
@@ -123,10 +71,6 @@ def node_extractor(state: TurnState, policy: SafetyPolicy, nlu_memory: EntityMem
     state.trace.nodes_run.append("extractor")
     text = state.user_input.lower()
     patch: dict[str, Any] = {}
-
-    year_match = re.search(r"\b(2024|2025)\b", text)
-    if year_match:
-        state.filing_year_override = int(year_match.group(1))
 
     # Standard extractions
     if m := re.search(r"(\d+)\s*km", text):
@@ -152,18 +96,19 @@ def node_extractor(state: TurnState, policy: SafetyPolicy, nlu_memory: EntityMem
         )
 
         for item in nlu_items:
-            item_data = {
-                "amount_gross_eur": item["unit_price_eur"],
-                "description": item["description"],
-                "purchase_date": date(filing_year, 6, 15).isoformat(),
-                "has_receipt": True,
-            }
             # FIX: Remember the entire parsed item, which has the correct structure
             nlu_memory.remember({"kind": "equipment_item", "data": item})
 
             # This loop now correctly processes items from both the parser and the memory
             for _ in range(item.get("quantity", 1)):
-                equipment_list.append(item_data)
+                equipment_list.append(
+                    {
+                        "amount_gross_eur": item["unit_price_eur"],
+                        "purchase_date": date(filing_year, 6, 15).isoformat(),
+                        "has_receipt": True,
+                        "description": item["description"],
+                    }
+                )
 
     if patch:
         state.patch_proposal = PatchProposal(patch=patch, rationale="Extracted from user input.")
@@ -177,62 +122,6 @@ def node_knowledge_agent(state: TurnState, retriever: InMemoryRetriever) -> Turn
     )
     state.rule_hits = retriever.search(query=state.retrieval_query, year=filing_year)
     state.trace.rules_used = [{"rule_id": h.rule_id, "year": h.year} for h in state.rule_hits]
-    return state
-
-
-def node_question_generator(state: TurnState, policy: SafetyPolicy) -> TurnState:
-    """Checks if any required data for relevant, calculable rules is missing."""
-    state.trace.nodes_run.append("question_generator")
-    if not state.rule_hits:
-        return state
-
-    temp_profile_data = json.loads(json.dumps(state.profile.data))
-    if state.patch_proposal:
-        _deep_merge(state.patch_proposal.patch, temp_profile_data)
-
-    # FIX: Only consider rules that are directly relevant to the user's query
-    triggered_categories = (
-        {state.category_hint} if state.category_hint else {h.category for h in state.rule_hits}
-    )
-    calculable_categories = {"commuting", "home_office", "equipment"}
-    relevant_categories = triggered_categories.intersection(calculable_categories)
-
-    if not relevant_categories:
-        return state
-
-    required_keys: set[str] = set()
-    for hit in state.rule_hits:
-        if hit.category in relevant_categories:
-            required_keys.update(hit.required_data_points)
-
-    if not required_keys:
-        return state
-
-    missing_keys: set[str] = set()
-    for key in required_keys:
-        parts, current_level, is_missing = key.split("."), temp_profile_data, False
-        for part in parts:
-            if not isinstance(current_level, dict) or part not in current_level:
-                is_missing = True
-                break
-            current_level = current_level.get(part, {})
-        if is_missing:
-            missing_keys.add(key)
-
-    if missing_keys:
-        first_missing = sorted(list(missing_keys))[0]
-        q_text = (
-            f"To help calculate this, I need some more information. "
-            f"What is the value for '{first_missing}'?"
-        )
-        state.questions.append(
-            ClarifyingQuestion(
-                id=f"q_{uuid.uuid4().hex[:8]}",
-                text=q_text,
-                field_key=first_missing,
-                why_it_matters="Needed for calculation.",
-            )
-        )
     return state
 
 
@@ -281,9 +170,7 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
     return state
 
 
-def node_reasoner(
-    state: TurnState, groq: GroqAdapter, on_token: Callable[[str], None]
-) -> TurnState:
+def node_reasoner(state: TurnState, groq: GroqAdapter) -> TurnState:
     """Uses an LLM to synthesize a final answer from all available context."""
     state.trace.nodes_run.append("reasoner")
     lang = resolve_language(state)
@@ -312,7 +199,7 @@ def node_reasoner(
     ]
 
     # Use a larger, more capable model for reasoning
-    state.answer_draft = groq.chat(model="llama-3.1-8b-instant", messages=messages)
+    state.answer_draft = groq.chat(model="llama3-70b-8192", messages=messages)
     return state
 
 

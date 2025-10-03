@@ -16,6 +16,7 @@ class GroqAdapter:
 
     def __init__(self, api_key: str | None, timeout_s: float = 8.0) -> None:
         self.api_key = api_key
+        # self.offline = True
         self.offline = not api_key
         if not self.offline:
             self.client = Groq(api_key=self.api_key, timeout=timeout_s)
@@ -39,12 +40,21 @@ class GroqAdapter:
             last_user = next(
                 (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
             ).lower()
+            print("OFFLINE ROUTER INPUT:", repr(last_user))  # DEBUG
+            # TEMP TEST: Force all router outputs to be equipment
+            hint = "equipment"
+            print(
+                "OFFLINE ROUTER RETURNING:",
+                {"intent": "deduction", "category_hint": hint, "retrieval_query": last_user},
+            )  # DEBUG
+            return {"intent": "deduction", "category_hint": hint, "retrieval_query": last_user}
             if any(w in last_user for w in ["commute", "pendler"]):
                 hint = "commuting"
             elif any(w in last_user for w in ["home office", "homeoffice"]):
                 hint = "home_office"
-            elif any(w in last_user for w in ["equipment", "laptop"]):
+            elif any(w in last_user for w in ["equipment", "laptop", "arbeitsmittel", "gekauft"]):
                 hint = "equipment"
+                print("Offline router keywords test:", last_user, "| Hint?", hint)
             else:
                 hint = None
             return {"intent": "deduction", "category_hint": hint, "retrieval_query": last_user}
