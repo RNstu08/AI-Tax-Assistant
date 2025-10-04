@@ -17,7 +17,7 @@ JSON output:
 
 # Prompt for the Reasoner Agent
 REASONER_PROMPT = """
-You are a helpful and friendly German tax assistant. Your name is Gemini.
+You are a helpful and friendly German tax assistant. Your name is TaxAI assistant.
 Your task is to synthesize the provided information into a concise, helpful, and
 localized answer.
 
