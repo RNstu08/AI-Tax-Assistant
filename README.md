@@ -4,8 +4,6 @@
 
 A modular, auditable, and transparent conversational AI designed to assist German employees with their tax deductions, featuring receipt processing, consent management, a full reasoning trace, and built-in audit capabilities.
 
----
-
 ## 🎯 The Challenge & Project Goals
 
 The core task, as defined by the case study was to design and prototype a personalized, intelligent, and transparent multi-agent system for tax declarations.
