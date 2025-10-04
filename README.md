@@ -202,5 +202,3 @@ The project is configured with a professional-grade testing and CI pipeline.
   - **CI:** The workflow in `.github/workflows/ci.yml` automatically runs linting (Ruff), formatting checks (Black), type checks (Mypy), and the full Pytest suite on every push and pull request.
 
 <!-- end list -->
-
-```
