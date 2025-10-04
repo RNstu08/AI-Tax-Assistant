@@ -1,11 +1,8 @@
 -----
 
-````markdown
 # AI Tax Assistant - A Multi-Agent System for Personalized Tax Declarations
 
-_A modular, auditable, and transparent conversational AI designed to assist German employees with their tax deductions, featuring receipt processing, consent management, a full reasoning trace, and built-in audit capabilities._
-
----
+A modular, auditable, and transparent conversational AI designed to assist German employees with their tax deductions, featuring receipt processing, consent management, a full reasoning trace, and built-in audit capabilities.
 
 ## 🎯 The Challenge & Project Goals
 
@@ -17,8 +14,6 @@ This project aims to fulfill that challenge by delivering:
 -   **Receipts and Audit:** Enabling users to upload files, extract data via OCR, and manage their data with GDPR-compliant retention policies, a full audit trail, and an undo function.
 -   **Business-Level Safety:** Ensuring all changes, evidence, and settings are logged and auditable for compliance.
 -   **Intuitive and Accessible UX:** Featuring new-user hints, proactive suggestions, and clear action-oriented controls to suggest and execute specific actions (like saving data) with user confirmation.
-
----
 
 ## 🏛️ Architectural Overview: An Agentic Pipeline Approach
 
@@ -57,8 +52,6 @@ User Input ──────►│           Orchestrator           │
                      UI (Answer & Actions)
 ````
 
------
-
 ## 🖥️ Usage Guide
 
 **1. Chat**: Start a conversation by asking about your deductions (e.g., *"I commute 20km for 200 days in 2024"* or *"I worked from home 80 days this year."*). The AI agents will parse, reason, calculate, and cite the relevant tax rules.
@@ -73,8 +66,6 @@ User Input ──────►│           Orchestrator           │
 
 **6. Settings**: Configure the assistant's language, your data retention policies, and manage consent for features like OCR. You can also download your user data in compliance with GDPR.
 
------
-
 ## ✨ Key Features vs. Case Study Requirements
 
 | Requirement                 | How It's Implemented                                                                                                                                                             |
@@ -87,8 +78,6 @@ User Input ──────►│           Orchestrator           │
 | **Memory's Impact Shown** | Demonstrated through pronoun resolution ("another one") and by the system using saved profile data in subsequent conversations (e.g., "what's my summary?").                  |
 | **Adaptive Interaction** | The assistant adapts its language based on user **Settings** and avoids re-asking for information already present in the user's profile.                                         |
 
------
-
 ## 🤝 Edge Cases & Guardrails
 
   - **Out of Scope**: The `Safety Gate` agent provides a friendly message when asked about unsupported topics (e.g., Austrian tax law, freelancer status).
@@ -96,8 +85,6 @@ User Input ──────►│           Orchestrator           │
   - **Consent Enforcement**: OCR processing is blocked until the user grants permission in the **Settings** tab, ensuring privacy compliance.
   - **File Safety**: The system validates all uploads for allowed types (`PDF`, `JPG`, `PNG`) and size (\<7MB), and sanitizes filenames to prevent malicious inputs.
   - **Data Integrity**: All stored files and evidence logs are hashed. The **Maintenance** tab includes an "Integrity Scan" to verify that no data has been tampered with.
-
------
 
 ## 🚀 Setup & Running the Prototype
 
@@ -156,8 +143,6 @@ scripts/run.ps1
 streamlit run app/ui/streamlit_app.py
 ```
 
------
-
 ## 📂 Project Structure
 
 ```
@@ -185,7 +170,6 @@ AI-Tax-Assistant/
 ├── tools/                  # Deterministic calculators and money helpers
 └── .github/                # CI workflow for linting, type-checking, and testing
 ```
------
 
 ## 💡 Reflection & Future Improvements
 
@@ -195,8 +179,6 @@ AI-Tax-Assistant/
       * **Hybrid Retriever:** Combine the current keyword search with vector-based semantic search for better rule matching.
       * **Production-Ready Memory:** Replace SQLite with a more scalable database like PostgreSQL.
       * **User Authentication:** Implement a full authentication system to replace the current single "demo" user.
-
------
 
 ## 🛠️ Tech Stack
 
@@ -209,8 +191,6 @@ AI-Tax-Assistant/
   - **Code Quality:** Ruff, Black, Mypy, Pytest, Pre-commit
   - **CI/CD:** GitHub Actions
 
------
-
 ## 🧪 Testing & CI
 
 The project is configured with a professional-grade testing and CI pipeline.
@@ -222,6 +202,3 @@ The project is configured with a professional-grade testing and CI pipeline.
   - **CI:** The workflow in `.github/workflows/ci.yml` automatically runs linting (Ruff), formatting checks (Black), type checks (Mypy), and the full Pytest suite on every push and pull request.
 
 <!-- end list -->
-
-```
-```
