@@ -24,7 +24,6 @@ class IndexedRule:
 
 
 class InMemoryRetriever:
-    # ... (__init__ is unchanged) ...
     def __init__(self, index_path: str | Path = ".data/rules_index.json") -> None:
         path = Path(index_path)
         if not path.exists():
@@ -64,8 +63,10 @@ class InMemoryRetriever:
             overlap = len(q_tokens.intersection(rule.search_terms))
             fuzz_boost = fuzz.partial_ratio(query.lower(), " ".join(rule.search_terms)) / 100.0
             score = (overlap * 1.0) + (fuzz_boost * 0.5)
-            if score > 0:
+            if score >= 1.0:
                 candidates.append((score, rule))
+            # if score > 0:
+            #     candidates.append((score, rule))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
 
@@ -74,7 +75,7 @@ class InMemoryRetriever:
                 rule_id=rule.rule_id,
                 year=rule.year,
                 title=rule.title,
-                # FIX: Ignore this line as we know the str is a valid Category
+                # Ignore this line as we know the str is a valid Category
                 category=rule.category,  # type: ignore
                 snippet=rule.snippet,
                 required_data_points=rule.required_data_points,

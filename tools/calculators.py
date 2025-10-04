@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import TypedDict
 
 from tools.constants import CONST
-from tools.money import D, quantize_eur
+from tools.money import D, fmt_eur, quantize_eur
 
 
 class CalcResult(TypedDict, total=False):
@@ -28,7 +28,33 @@ def calc_commute(
         min(km_one_way, D(20)) * c["rate_first_20"]
         + max(km_one_way - D(20), D(0)) * c["rate_after_20"]
     )
-    return {"amount_eur": quantize_eur(per_day * D(eligible_days))}
+    total_amount = quantize_eur(per_day * D(eligible_days))
+
+    # NEW: Create a pre-written, guaranteed-correct explanation string.
+    explanation = (
+        f"For your commute of {km_one_way} km, the daily allowance is {fmt_eur(per_day)}. "
+        f"This is calculated over {eligible_days} commuting days "
+        f"({work_days} total work days - {home_office_days} home office days), "
+        f"resulting in a total of {fmt_eur(total_amount)}."
+    )
+
+    return {
+        "amount_eur": total_amount,
+        "year": year,
+        "explanation": explanation,  # NEW: Add the explanation to the result
+    }
+
+
+# def calc_commute(
+#     year: int, km_one_way: Decimal, work_days: int, home_office_days: int
+# ) -> CalcResult:
+#     c = CONST[year]["commute"]
+#     eligible_days = max(work_days - home_office_days, 0)
+#     per_day = (
+#         min(km_one_way, D(20)) * c["rate_first_20"]
+#         + max(km_one_way - D(20), D(0)) * c["rate_after_20"]
+#     )
+#     return {"amount_eur": quantize_eur(per_day * D(eligible_days))}
 
 
 def calc_home_office(year: int, home_office_days: int) -> CalcResult:

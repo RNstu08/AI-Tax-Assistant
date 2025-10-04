@@ -310,6 +310,100 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
     return state
 
 
+# def node_reasoner(
+#     state: TurnState, groq: GroqAdapter, on_token: Callable[[str], None]
+# ) -> TurnState:
+#     """Uses an LLM to synthesize a final answer from all available context."""
+#     state.trace.nodes_run.append("reasoner")
+#     lang = resolve_language(state)
+#     state.disclaimer = t(lang, CopyKey.DISCLAIMER)
+
+#     # Build the context for the LLM
+#     rules_context = "\n".join([f"- {h.title}: {h.snippet}" for h in state.rule_hits])
+
+#     # Make the calculation context intent-aware
+
+#     # calc_lines = []
+#     # if state.calc_results:
+#     #     for key, res in state.calc_results.items():
+#     #         # Look for the new 'explanation' field first.
+#     #         if "explanation" in res:
+#     #             calc_lines.append(f"- {key.replace('_', ' ').title()}: {res['explanation']}")
+#     #         # Fallback for calculators that don't have an explanation yet.
+#     #         elif "amount_eur" in res:
+#     #             calc_lines.append(f"- {key.replace('_', ' ').title()}:
+#                               {fmt_eur(res['amount_eur'])}")
+#     # if calc_lines:
+#     #     calc_context = "\n".join(calc_lines)
+#     calc_context = ""
+#     # ONLY show calculations if the user's intent was to discuss a deduction.
+#     if state.intent == "deduction" and state.calc_results:
+#         calc_lines = []
+#         # If new information was just extracted, only talk about that new information.
+#         if state.patch_proposal:
+#             new_cats = state.patch_proposal.patch.get("deductions", {}).keys()
+#             for cat_name in new_cats:
+#                 for result_key, result_data in state.calc_results.items():
+#                     if cat_name.startswith(result_key.split("_")[0]):
+#                         amount_str = fmt_eur(result_data["amount_eur"])
+#                         calc_lines.append(f"- {result_key.replace('_', ' ').title()}:
+#                                               {amount_str}")
+#         else:  # Otherwise, if it's a general deduction query, summarize all known calculations.
+#             for key, res in state.calc_results.items():
+#                 if "amount_eur" in res:
+#                     amount_str = fmt_eur(res["amount_eur"])
+#                     calc_lines.append(f"- {key.replace('_', ' ').title()}: {amount_str}")
+#                     # Add the detailed breakdown if it exists
+#                     if "inputs_used" in res:
+#                         for input_key, input_val in res["inputs_used"].items():
+#                             calc_lines.append(f"  - {input_key}: {input_val}")
+#                     if "breakdown" in res:
+#                         for breakdown_key, breakdown_val in res["breakdown"].items():
+#                             calc_lines.append(f"  - {breakdown_key}: {breakdown_val}")
+#             if calc_lines:
+#                 calc_context = "\n".join(calc_lines)
+
+
+#         #     for key, res in state.calc_results.items():
+#         #         if "total" not in key and "amount_eur" in res:
+#         #             calc_lines.append(
+#         #                 f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}"
+#         #             )
+
+#         # if calc_lines:
+#         #     calc_context = "\n".join(calc_lines)
+
+#     # If the intent is not a deduction or no relevant calculations were made,
+#     # use a more generic message.
+#     if not calc_context:
+#         calc_context = "No relevant calculations were performed for this specific query."
+
+#     system_prompt = REASONER_PROMPT.format(
+#         language="German" if lang == "de" else "English",
+#         filing_year=state.profile.data.get("filing", {}).get("filing_year", 2025),
+#         rules_context=rules_context or "No specific rules found.",
+#         calculations_context=calc_context,
+#     )
+#     messages = [
+#         {"role": "system", "content": system_prompt},
+#         {"role": "user", "content": state.user_input},
+#     ]
+
+#     full_response = ""
+
+#     def collect_and_stream(token: str):
+#         nonlocal full_response
+#         full_response += token
+#         on_token(token)
+
+#     groq.stream(model="llama-3.1-8b-instant", messages=messages, on_token=collect_and_stream)
+#     state.answer_draft = full_response
+
+#     # The final node_critic will add the disclaimer
+#     state.answer_revised = state.answer_draft
+#     return state
+
+
 def node_reasoner(
     state: TurnState, groq: GroqAdapter, on_token: Callable[[str], None]
 ) -> TurnState:
@@ -321,38 +415,37 @@ def node_reasoner(
     # Build the context for the LLM
     rules_context = "\n".join([f"- {h.title}: {h.snippet}" for h in state.rule_hits])
 
-    # Make the calculation context intent-aware
+    # --- CORRECTED CALCULATION CONTEXT LOGIC ---
+
+    # 1. Initialize calc_context to prevent crashes on simple greetings.
     calc_context = ""
-    # ONLY show calculations if the user's intent was to discuss a deduction.
-    if state.intent == "deduction" and state.calc_results:
-        calc_lines = []
-        # If new information was just extracted, only talk about that new information.
-        if state.patch_proposal:
-            new_cats = state.patch_proposal.patch.get("deductions", {}).keys()
-            for cat_name in new_cats:
-                for result_key, result_data in state.calc_results.items():
-                    if cat_name.startswith(result_key.split("_")[0]):
-                        amount_str = fmt_eur(result_data["amount_eur"])
-                        calc_lines.append(f"- {result_key.replace('_', ' ').title()}: {amount_str}")
-        else:  # Otherwise, if it's a general deduction query, summarize all known calculations.
-            for key, res in state.calc_results.items():
-                if "total" not in key and "amount_eur" in res:
-                    calc_lines.append(
-                        f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}"
-                    )
+    calc_lines = []
 
-        if calc_lines:
-            calc_context = "\n".join(calc_lines)
+    # 2. Use the robust "explanation" pattern for calculations.
+    if state.calc_results:
+        for key, res in state.calc_results.items():
+            # Use the pre-written explanation if it exists.
+            if "explanation" in res and res["explanation"]:
+                calc_lines.append(f"- {key.replace('_', ' ').title()}: {res['explanation']}")
+            # Fallback for simple calculations without a detailed explanation.
+            elif "amount_eur" in res:
+                calc_lines.append(
+                    f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}"
+                )
 
-    # If the intent is not a deduction or no relevant calculations were made,
-    # use a more generic message.
+    if calc_lines:
+        calc_context = "\n".join(calc_lines)
+
+    # 3. Provide a clear fallback message if no calculations were performed.
     if not calc_context:
-        calc_context = "No relevant calculations were performed for this specific query."
+        calc_context = "No relevant calculations were performed for this query."
+
+    # --- END OF CORRECTION ---
 
     system_prompt = REASONER_PROMPT.format(
         language="German" if lang == "de" else "English",
         filing_year=state.profile.data.get("filing", {}).get("filing_year", 2025),
-        rules_context=rules_context or "No specific rules found.",
+        rules_context=rules_context or "No specific tax rules were found for this query.",
         calculations_context=calc_context,
     )
     messages = [
@@ -370,8 +463,7 @@ def node_reasoner(
     groq.stream(model="llama-3.1-8b-instant", messages=messages, on_token=collect_and_stream)
     state.answer_draft = full_response
 
-    # The final node_critic will add the disclaimer
-    state.answer_revised = state.answer_draft
+    state.answer_revised = state.answer_draft  # The critic will add the disclaimer later
     return state
 
 
