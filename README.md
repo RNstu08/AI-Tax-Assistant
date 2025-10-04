@@ -2,7 +2,7 @@
 
 # AI Tax Assistant - A Multi-Agent System for Personalized Tax Declarations
 
-_A modular, auditable, and transparent conversational AI designed to assist German employees with their tax deductions, featuring receipt processing, consent management, a full reasoning trace, and built-in audit capabilities._
+A modular, auditable, and transparent conversational AI designed to assist German employees with their tax deductions, featuring receipt processing, consent management, a full reasoning trace, and built-in audit capabilities.
 
 ---
 
