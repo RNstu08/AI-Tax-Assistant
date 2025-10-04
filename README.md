@@ -204,4 +204,3 @@ The project is configured with a professional-grade testing and CI pipeline.
 <!-- end list -->
 
 ```
-```
