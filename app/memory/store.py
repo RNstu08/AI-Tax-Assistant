@@ -84,6 +84,19 @@ def _apply_diff_reverse(data: dict, diffs: list) -> dict:
     return out
 
 
+# def sanitize_filename(name: str) -> str:
+#     # Remove potentially dangerous characters for all OSes
+#     name = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+#     # prevent blank, dot, or reserved names
+#     if not name or name.strip(" .") == "":
+#         return "uploaded_file"
+#     return name[:80]
+
+
+# def sha256_hex(data: bytes) -> str:
+#     return hashlib.sha256(data).hexdigest()
+
+
 class ProfileStore:
     def __init__(self, sqlite_path: str = ".data/profile.db", upload_dir: str = ".data/uploads"):
         self.sqlite_path = sqlite_path

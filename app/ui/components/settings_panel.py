@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
 from app.i18n.microcopy import CopyKey, t
@@ -54,7 +56,10 @@ def render_settings_panel(state: TurnState | None) -> None:
         t(ui_lang, CopyKey.RETENTION_ATTACHMENTS_DAYS),
         min_value=0,
         value=retention.get("attachments_days", 0),
+        help="Number of days to keep uploaded files. 0 = Keep forever.",
     )
+    if attach_days and attach_days < 7:
+        st.warning("Warning: Retention period is very short. You may lose files you want to keep!")
     evidence_days = st.number_input(
         t(ui_lang, CopyKey.RETENTION_EVIDENCE_DAYS),
         min_value=0,
@@ -86,3 +91,11 @@ def render_settings_panel(state: TurnState | None) -> None:
         else:
             st.success(t(ui_lang, CopyKey.SETTINGS_SAVED))
             st.rerun()
+
+    if st.button("Download my data (GDPR)"):
+        st.download_button(
+            label="Download my profile as JSON",
+            data=json.dumps(profile.data, indent=2),
+            file_name=f"profile_{user_id}.json",
+            mime="application/json",
+        )

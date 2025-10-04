@@ -4,7 +4,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from hashlib import sha256
 from typing import Any
 from venv import logger
@@ -54,25 +54,6 @@ def node_safety_gate(state: TurnState, policy: SafetyPolicy) -> TurnState:
     return state
 
 
-# def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
-#     """Uses an LLM to determine intent, category, and a search query."""
-#     state.trace.nodes_run.append("router")
-#     prompt = ROUTER_PROMPT.format(user_input=state.user_input)
-#     messages = [{"role": "user", "content": prompt}]
-
-#     # FIX: Update to a current, supported model for routing
-#     res = groq.json(model="llama-3.1-8b-instant", messages=messages)
-
-#     state.intent = res.get("intent", "question")
-#     #state.category_hint = res.get("category_hint")
-#     allowed = {"commuting", "home_office", "equipment", "donations"}
-#     raw = res.get("category_hint")
-#     cat = (raw or "").strip().lower()
-#     state.category_hint = cat if cat in allowed else None
-#     state.retrieval_query = res.get("retrieval_query", state.user_input)
-#     return state
-
-
 def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
     state.trace.nodes_run.append("router")
     prompt = ROUTER_PROMPT.format(user_input=state.user_input)
@@ -111,8 +92,12 @@ def node_router(state: TurnState, groq: GroqAdapter) -> TurnState:
             state.category_hint = "home_office"
         elif any(w in text for w in ["spende", "spenden", "gemeinnützig"]):
             state.category_hint = "donations"
-        state.category_hint = "equipment"  # etc.
-        logger.warning(f"Fallback keyword routing used for input: {state.user_input!r}")
+        # DO NOT set `state.category_hint = "equipment"` unconditionally!
+        logger.warning(
+            "Fallback keyword routing used for input: %s as %s",
+            state.user_input,
+            state.category_hint,
+        )
 
     state.intent = res.get("intent", "question")
     state.retrieval_query = res.get("retrieval_query", state.user_input)
@@ -124,17 +109,48 @@ def node_extractor(state: TurnState, policy: SafetyPolicy, nlu_memory: EntityMem
     text = state.user_input.lower()
     patch: dict[str, Any] = {}
 
+    # --- Ask for tax year if ambiguous/missing ---
+    has_year_in_text = re.search(r"\b(2024|2025)\b", text)
+    filing_set = state.filing_year_override or state.profile.data.get("filing", {}).get(
+        "filing_year"
+    )
+    if ("year" in text or "jahr" in text) and not has_year_in_text and not filing_set:
+        q_text = "For which tax year would you like to claim this deduction?"
+        state.questions.append(q_text)
+        if not getattr(state, "answer_draft", None):
+            state.answer_draft = q_text
+        return state
+    # ------
+
     year_match = re.search(r"\b(2024|2025)\b", text)
     if year_match:
         state.filing_year_override = int(year_match.group(1))
 
     # Standard extractions
-    if m := re.search(r"(\d+)\s*km", text):
-        patch.setdefault("deductions", {})["commute_km_per_day"] = int(m.group(1))
-    if m := re.search(r"(\d+)\s*(?:work\s*days|days|tage)", text):
-        patch.setdefault("deductions", {})["work_days_per_year"] = int(m.group(1))
-    if m := re.search(r"(?:home\s*office|homeoffice)[\s\w]*?(\d+)", text):
+    # Home office (multiple phrasings and languages)
+    if m := re.search(
+        r"(?:worked\s+from\s+home|home\s*office|homeoffice|remote|wfh|im homeoffice)"
+        r"[\s\w\-]*?(\d+)\s*(?:days|tage)?",
+        text,
+    ):
         patch.setdefault("deductions", {})["home_office_days"] = int(m.group(1))
+
+    # Commute distance (multiple cases)
+    if m := re.search(r"(commute|pendeln|entfernung|weg zur arbeit)[^\d]{0,20}(\d+)\s*km", text):
+        patch.setdefault("deductions", {})["commute_km_per_day"] = int(m.group(2))
+    elif m := re.search(r"(\d+)\s*km", text):
+        if "commute_km_per_day" not in patch.get("deductions", {}):
+            patch.setdefault("deductions", {})["commute_km_per_day"] = int(m.group(1))
+
+    # Work days (in EN/DE, explicit or implicit)
+    if m := re.search(r"(\d+)\s*(?:work\s*days|days|tage|arbeitstage)", text):
+        patch.setdefault("deductions", {})["work_days_per_year"] = int(m.group(1))
+
+    # Year
+    if m := re.search(r"\b(2024|2025)\b", text):
+        state.filing_year_override = int(m.group(1))
+    if "this year" in text:
+        state.filing_year_override = datetime.now().year
 
     # NLU Parsing for equipment, with pronoun resolution
     nlu_items = parse_line_items(state.user_input)
@@ -158,12 +174,15 @@ def node_extractor(state: TurnState, policy: SafetyPolicy, nlu_memory: EntityMem
                 "purchase_date": date(filing_year, 6, 15).isoformat(),
                 "has_receipt": True,
             }
-            # FIX: Remember the entire parsed item, which has the correct structure
+            # Remember the entire parsed item, which has the correct structure
             nlu_memory.remember({"kind": "equipment_item", "data": item})
 
             # This loop now correctly processes items from both the parser and the memory
             for _ in range(item.get("quantity", 1)):
                 equipment_list.append(item_data)
+
+    # print("DEBUG: node_extractor patch_proposal:", patch)
+    # print("DEBUG: node_question_generator missing_keys:", missing_keys)
 
     if patch:
         state.patch_proposal = PatchProposal(patch=patch, rationale="Extracted from user input.")
@@ -190,7 +209,7 @@ def node_question_generator(state: TurnState, policy: SafetyPolicy) -> TurnState
     if state.patch_proposal:
         _deep_merge(state.patch_proposal.patch, temp_profile_data)
 
-    # FIX: Only consider rules that are directly relevant to the user's query
+    # Only consider rules that are directly relevant to the user's query
     triggered_categories = (
         {state.category_hint} if state.category_hint else {h.category for h in state.rule_hits}
     )
@@ -267,6 +286,16 @@ def node_calculators(state: TurnState, policy: SafetyPolicy) -> TurnState:
     if "equipment_items" in deductions:
         total_equip = D(0)
         for i, item in enumerate(deductions["equipment_items"]):
+            amount = D(item["amount_gross_eur"])
+            # --- depreciation warning fix ---
+            if amount > 952:
+                msg = (
+                    f"Equipment item {i} ('{item['description']}') "
+                    f"costs {fmt_eur(amount)}, which is above the instant deduction limit. "
+                    "Consult a tax advisor for depreciation period."
+                )
+                state.errors.append(ErrorItem(code="depreciation_needed", message=msg))
+            # ------
             res = calc_equipment_item(
                 filing_year,
                 D(item["amount_gross_eur"]),
@@ -291,28 +320,58 @@ def node_reasoner(
 
     # Build the context for the LLM
     rules_context = "\n".join([f"- {h.title}: {h.snippet}" for h in state.rule_hits])
-    calc_context = "\n".join(
-        [
-            f"- {k.replace('_', ' ')}: {fmt_eur(v['amount_eur'])}"
-            for k, v in (state.calc_results or {}).items()
-            if "total" not in k
-        ]
-    )
+
+    # Make the calculation context intent-aware
+    calc_context = ""
+    # ONLY show calculations if the user's intent was to discuss a deduction.
+    if state.intent == "deduction" and state.calc_results:
+        calc_lines = []
+        # If new information was just extracted, only talk about that new information.
+        if state.patch_proposal:
+            new_cats = state.patch_proposal.patch.get("deductions", {}).keys()
+            for cat_name in new_cats:
+                for result_key, result_data in state.calc_results.items():
+                    if cat_name.startswith(result_key.split("_")[0]):
+                        amount_str = fmt_eur(result_data["amount_eur"])
+                        calc_lines.append(f"- {result_key.replace('_', ' ').title()}: {amount_str}")
+        else:  # Otherwise, if it's a general deduction query, summarize all known calculations.
+            for key, res in state.calc_results.items():
+                if "total" not in key and "amount_eur" in res:
+                    calc_lines.append(
+                        f"- {key.replace('_', ' ').title()}: {fmt_eur(res['amount_eur'])}"
+                    )
+
+        if calc_lines:
+            calc_context = "\n".join(calc_lines)
+
+    # If the intent is not a deduction or no relevant calculations were made,
+    # use a more generic message.
+    if not calc_context:
+        calc_context = "No relevant calculations were performed for this specific query."
 
     system_prompt = REASONER_PROMPT.format(
         language="German" if lang == "de" else "English",
         filing_year=state.profile.data.get("filing", {}).get("filing_year", 2025),
         rules_context=rules_context or "No specific rules found.",
-        calculations_context=calc_context or "No calculations were performed.",
+        calculations_context=calc_context,
     )
-
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": state.user_input},
     ]
 
-    # Use a larger, more capable model for reasoning
-    state.answer_draft = groq.chat(model="llama-3.1-8b-instant", messages=messages)
+    full_response = ""
+
+    def collect_and_stream(token: str):
+        nonlocal full_response
+        full_response += token
+        on_token(token)
+
+    groq.stream(model="llama-3.1-8b-instant", messages=messages, on_token=collect_and_stream)
+    state.answer_draft = full_response
+
+    # The final node_critic will add the disclaimer
+    state.answer_revised = state.answer_draft
     return state
 
 
@@ -369,14 +428,6 @@ def node_trace_emitter(state: TurnState) -> TurnState:
     return state
 
 
-# def resolve_language(state: TurnState) -> str:
-#     """Determines the language for the turn, prioritizing user preference."""
-#     pref = state.profile.data.get("preferences", {}).get("language", "auto")
-#     if pref in ("en", "de"):
-#         return pref
-#     return lang_detect(state.user_inp
-
-
 def apply_ui_action(
     user_id: str, ui_action: UIAction, last_state: TurnState, store: ProfileStore
 ) -> TurnState:
@@ -419,16 +470,9 @@ def apply_ui_action(
         store.commit_action(user_id, action_id, "set_preferences", patch, "", diff, True)
         state.profile = new_snapshot
     elif ui_action.kind == "import_parsed_items":
-        if not (ui_action.payload and "attachment_id" in ui_action.payload):
+        if not (ui_action.payload and "items" in ui_action.payload):
             state.errors.append(
-                ErrorItem(code="invalid_payload", message="Import action is missing data.")
-            )
-            return state
-
-        parsed_record = store.get_receipt_parse_by_attachment(ui_action.payload["attachment_id"])
-        if not parsed_record:
-            state.errors.append(
-                ErrorItem(code="parse_not_found", message="OCR parse result not found.")
+                ErrorItem(code="invalid_payload", message="Import action is missing item data.")
             )
             return state
 
@@ -437,23 +481,20 @@ def apply_ui_action(
             "filing_year", date.today().year
         )
 
-        item_indices = ui_action.payload.get("item_indices", [])
-        for index in item_indices:
+        for item in ui_action.payload["items"]:
             try:
-                item = parsed_record["parsed_data"]["items"][index]
                 items_to_add.append(
                     {
-                        "description": item["description"],
-                        "amount_gross_eur": item["total_eur"],
+                        "description": str(item["description"]),
+                        "amount_gross_eur": str(D(item["total_eur"])),
                         "purchase_date": date(filing_year, 6, 15).isoformat(),
                         "has_receipt": True,
                     }
                 )
-            except (IndexError, KeyError):
+            except (KeyError, TypeError):
                 continue
 
         if items_to_add:
-            # FIX: Get the existing items and append the new ones.
             current_profile = store.get_profile(user_id)
             existing_items = current_profile.data.get("deductions", {}).get("equipment_items", [])
             updated_items = existing_items + items_to_add
@@ -465,7 +506,6 @@ def apply_ui_action(
                 user_id, action_id, "import_parsed_items", ui_action.payload, "", diff, True
             )
             state.profile = new_snapshot
-            state.proposed_actions = []
             state.committed_action = CommitResult(
                 action_id=action_id, committed=True, version_after=new_snapshot.version
             )
@@ -517,78 +557,31 @@ def run_turn_streaming(
 
     # Graph Execution
     state = node_safety_gate(state, policy)
-    if state.errors:
-        return state
     state = node_router(state, groq)
-    if state.errors:
-        return state
     state = node_extractor(state, policy, nlu_memory)
-    if state.errors:
-        return state
     state = node_knowledge_agent(state, retriever)
-    if state.errors:
-        return state
-
+    state = node_question_generator(state, policy)
     state = node_calculators(state, policy)
-    if state.errors:
-        return state
     state = node_reasoner(state, groq, on_token)  # Pass the callback to the reasoner
-    if state.errors:
-        return state
-
-    # --- Stream the Reasoner's response ---
-    state.trace.nodes_run.append("reasoner")
-    lang = resolve_language(state)
-    state.disclaimer = t(lang, CopyKey.DISCLAIMER)
-    rules_context = "\n".join([f"- {h.title}: {h.snippet}" for h in state.rule_hits])
-    calc_context = "\n".join(
-        [
-            f"- {k.replace('_', ' ')}: {fmt_eur(v['amount_eur'])}"
-            for k, v in (state.calc_results or {}).items()
-            if "total" not in k
-        ]
-    )
-    system_prompt = REASONER_PROMPT.format(
-        language="German" if lang == "de" else "English",
-        filing_year=filing_year_override or profile.data.get("filing", {}).get("filing_year", 2025),
-        rules_context=rules_context or "No rules found.",
-        calculations_context=calc_context or "No calculations made.",
-    )
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": state.user_input},
-    ]
-
-    full_response = ""
-
-    def collect_response_and_stream(token: str):
-        """Nested function to both call the UI callback and build the full response."""
-        nonlocal full_response
-        full_response += token
-        on_token(token)
-
-    # Correctly stream and build response via callback
-    groq.stream(
-        model="llama-3.3-70b-versatile", messages=messages, on_token=collect_response_and_stream
-    )
-
-    state.answer_draft = full_response
-
-    # full_response = ""
-    # stream = groq.stream(model="llama-3.3-70b-versatile", messages=messages, on_token=on_token)
-    # for token in stream:
-    #     full_response += token
-    #     on_token(token)
-
     state = node_critic(state, policy)
-    if state.errors:
-        return state
     state = node_action_planner(state, policy)
-    if state.errors:
-        return state
     state = node_trace_emitter(state)
 
-    if nlu_memory.entities:
-        store.apply_patch(user_id, {"nlu_memory": nlu_memory.to_dict()})
-
+    if state.errors:
+        # Join all error messages for the user into the answer field
+        lang = resolve_language(state)
+        state.answer_draft = "\n".join([e.message for e in state.errors])
+        # Optionally also add disclaimer as in normal flows
+        state.answer_revised = f"{state.answer_draft}\n\n{t(lang, CopyKey.DISCLAIMER)}"
+    elif (
+        not getattr(state, "answer_draft", None) or not state.answer_draft.strip()
+    ) and state.questions:
+        # Surface the latest clarifying question to the user if no answer yet
+        # and there's a question pending
+        state.answer_draft = (
+            state.questions[-1].text
+            if isinstance(state.questions[-1], ClarifyingQuestion)
+            else state.questions[-1]
+        )
+        state.answer_revised = state.answer_draft
     return state

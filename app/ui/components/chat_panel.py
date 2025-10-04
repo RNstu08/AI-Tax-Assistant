@@ -6,7 +6,6 @@ from app.orchestrator.graph import run_turn_streaming
 
 
 def render_chat_panel() -> None:
-    """Renders the main chat interface with history and input form."""
     st.subheader("Chat")
 
     if "messages" not in st.session_state:
@@ -20,7 +19,7 @@ def render_chat_panel() -> None:
         user_text = st.text_area(
             "Your message:",
             placeholder="Ask about your deductions, e.g., 'I commute 30km for 220 days.'",
-            key="chat_input",
+            key="chat_input",  # A key helps Streamlit manage the state of this widget
         )
         submitted = st.form_submit_button("Send")
 
@@ -33,7 +32,6 @@ def render_chat_panel() -> None:
             placeholder = st.empty()
             full_response = ""
 
-            # This callback function will be called by the streaming orchestrator
             def on_token(token: str):
                 nonlocal full_response
                 full_response += token
@@ -47,11 +45,52 @@ def render_chat_panel() -> None:
                 filing_year_override=filing_year,
             )
 
-            placeholder.markdown(result.answer_revised)
-            st.session_state["last_result"] = result
-            st.session_state.messages.append(
-                {"role": "assistant", "content": result.answer_revised}
-            )
-
+            # --- Show clarifying question with blue highlight (if needed) ---
+            if result.questions:
+                # Show newest question
+                question = result.questions[-1]
+                display_text = getattr(question, "text", question)
+                st.info(f"❓ <b>More info needed:</b> {display_text}")
+                # st.info(f"❓ <b>More info needed:</b> {result.questions[-1].text}")
+                # st.session_state["last_result"] = result
+                # last_q = result.questions[-1]
+                # q_text = getattr(last_q, "text", last_q)
+                # st.session_state.messages.append(
+                #     {"role": "assistant", "content": f"❓ {q_text}"}
+                # )
+                st.session_state["last_result"] = result
+                question = result.questions[-1]
+                display_text = getattr(question, "text", question)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": f"❓ {display_text}"}
+                )
+            else:
+                # Normal answer
+                placeholder.markdown(result.answer_revised)
+                st.session_state["last_result"] = result
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": result.answer_revised}
+                )
         st.rerun()
+
+        # --- NEW CODE BLOCK STARTS HERE ---
+    # Add a visual separator
+    st.divider()
+
+    # Add the "Ask a human" button with conditional logic
+    if st.button("❔ Ask a human about this answer"):
+        # Check if a conversation has started
+        if st.session_state.messages:
+            st.info(
+                "Your question has been flagged for human review (demo)."
+                "Support will contact you soon!"
+            )
+            # In a real app, you would add the escalation logic here.
+        else:
+            # If no conversation has started, guide the user.
+            st.warning(
+                "Please ask a question in the chat box above before requesting a human review."
+            )
+    # --- NEW CODE BLOCK ENDS HERE ---
+
     st.caption("Examples: 'I worked from home 150 days in 2024', 'I bought a laptop for 900€'")

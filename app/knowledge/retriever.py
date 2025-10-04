@@ -1,4 +1,3 @@
-# ... (imports and IndexedRule are unchanged) ...
 from __future__ import annotations
 
 import json

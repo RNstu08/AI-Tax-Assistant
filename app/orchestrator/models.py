@@ -82,7 +82,7 @@ class TurnState(BaseModel):
     disclaimer: str = ""
     calc_results: dict[str, Any] = Field(default_factory=dict)
 
-    # FIX: Add the missing 'citations' field
+    # Add the missing 'citations' field
     citations: list[str] = []
 
     # Final outputs for the UI
