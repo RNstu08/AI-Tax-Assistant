@@ -15,8 +15,6 @@ This project aims to fulfill that challenge by delivering:
 -   **Business-Level Safety:** Ensuring all changes, evidence, and settings are logged and auditable for compliance.
 -   **Intuitive and Accessible UX:** Featuring new-user hints, proactive suggestions, and clear action-oriented controls to suggest and execute specific actions (like saving data) with user confirmation.
 
----
-
 ## 🏛️ Architectural Overview: An Agentic Pipeline Approach
 
 The system is designed as an **agentic pipeline**, where a user's request flows through a "team" of specialized agents (nodes). Each agent has a specific job, enriching a central data object (`TurnState`) as it passes through the system. This modular, graph-based design is managed by an **Orchestrator** and ensures clarity, testability, and scalability.
